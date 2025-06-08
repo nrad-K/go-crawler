@@ -1,0 +1,45 @@
+# クロール戦略: "next_link"は「次へ」ボタンをたどる、"total_count"は総件数からページ数を計算
+strategy: "next_link"
+# クロールを開始するベースURL
+base_url: "https://books.toscrape.com/"
+# 各リクエスト間の待機時間（秒）
+sleep_seconds: 10
+# リクエストヘッダーに設定するUser-Agent
+user_agent: "Mozilla/5.0 (compatible; JobCrawler/1.0)"
+# リクエストのタイムアウト時間（秒）
+timeout_seconds: 10
+# リクエストが失敗した際の再試行回数
+retry_count: 1
+# クロール結果を保存するディレクトリ
+output_directory: "./data/html"
+
+# リクエストに追加するカスタムヘッダー
+headers:
+  Accept-Language: "ja-JP"
+  X-Custom-Header: "example"
+
+# クロール対象要素のCSSセレクター設定
+selector:
+  # 都道府県（またはカテゴリ）リンクのCSSセレクター
+  prefecture_link_selector: "ul.nav > li > ul > li > a"
+  # 次のページへのリンクのCSSセレクター（next_link戦略用）
+  pagination_selector: "li.next > a"
+  # 総件数を取得するためのCSSセレクター（total_count戦略用）
+  total_count_selector: ""
+  # 求人（または詳細情報）リンクのCSSセレクター
+  job_link_selector: "article.product_pod > h3 > a"
+  # 詳細求人リンクが相対パスの場合に、BaseURLに結合するプレフィックスパス（例: /jobs）
+  prefix_path: ""
+
+# ページネーションに関する設定
+pagination:
+  # ページネーションのタイプ: "query", "path", "segment", "none"
+  type: "none"
+  # ページネーションを識別するための文字列（例: "page", "p", またはパスの "page"）
+  param_identifier: ""
+  # ページ番号の書式指定（例: "%d"、"%02d" など。パス/セグメントタイプで特に有効）
+  page_format: ""
+  # ページネーションの開始番号
+  start: 1
+  # 1ページあたりの項目数
+  per_page: 20
