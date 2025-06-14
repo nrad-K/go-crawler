@@ -7,17 +7,22 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-type HTMLParser interface {
+type HTMLDocument interface {
 	ExtractText(html string, selector string) ([]string, error)
 	ExtractAttribute(html string, selector, attr string) ([]string, error)
 	ExtractTextByRegex(html, selector, pattern string) ([]string, error)
 }
 
-type htmlParser struct {
+type htmlDocument struct {
+	doc *goquery.Document
 }
 
-func NewHTMLParser() HTMLParser {
-	return &htmlParser{}
+func NewHTMLDocument(html string) (HTMLDocument, error) {
+	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+	return &htmlDocument{doc: document}, nil
 }
 
 // ExtractText はHTMLから特定のセレクタにマッチする要素のテキストを抽出します。
@@ -43,7 +48,7 @@ func NewHTMLParser() HTMLParser {
 // 戻り値:
 //   - []string: 抽出されたテキストの配列
 //   - error: エラーが発生した場合のエラー情報
-func (h *htmlParser) ExtractText(html string, selector string) ([]string, error) {
+func (h *htmlDocument) ExtractText(html string, selector string) ([]string, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
@@ -81,7 +86,7 @@ func (h *htmlParser) ExtractText(html string, selector string) ([]string, error)
 // 戻り値:
 //   - []string: 抽出された属性値の配列
 //   - error: エラーが発生した場合のエラー情報
-func (h *htmlParser) ExtractAttribute(html string, selector, attr string) ([]string, error) {
+func (h *htmlDocument) ExtractAttribute(html string, selector, attr string) ([]string, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
@@ -130,7 +135,7 @@ func (h *htmlParser) ExtractAttribute(html string, selector, attr string) ([]str
 // 戻り値:
 //   - []string: マッチした文字列の配列
 //   - error: エラーが発生した場合のエラー情報
-func (h *htmlParser) ExtractTextByRegex(html, selector, pattern string) ([]string, error) {
+func (h *htmlDocument) ExtractTextByRegex(html, selector, pattern string) ([]string, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err

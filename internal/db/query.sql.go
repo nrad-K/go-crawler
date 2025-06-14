@@ -13,146 +13,364 @@ import (
 	"github.com/google/uuid"
 )
 
-const createJobPosting = `-- name: CreateJobPosting :exec
+const createCompany = `-- name: CreateCompany :one
+INSERT INTO companies (
+    name,
+    headquarters_prefecture_code,
+    headquarters_prefecture_name,
+    headquarters_municipality,
+    headquarters_raw
+) VALUES (
+    $1, $2, $3, $4, $5
+) ON CONFLICT (name, headquarters_raw)
+DO UPDATE SET updated_at = now()
+RETURNING id
+`
+
+type CreateCompanyParams struct {
+	Name                       string
+	HeadquartersPrefectureCode string
+	HeadquartersPrefectureName string
+	HeadquartersMunicipality   string
+	HeadquartersRaw            string
+}
+
+// Company queries
+func (q *Queries) CreateCompany(ctx context.Context, arg CreateCompanyParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, createCompany,
+		arg.Name,
+		arg.HeadquartersPrefectureCode,
+		arg.HeadquartersPrefectureName,
+		arg.HeadquartersMunicipality,
+		arg.HeadquartersRaw,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createJobBenefits = `-- name: CreateJobBenefits :exec
+INSERT INTO job_benefits (
+    job_posting_id,
+    social_insurance,
+    transport_allowance,
+    housing_allowance,
+    company_housing,
+    rent_subsidy,
+    meal_allowance,
+    cafeteria_provided,
+    training_support,
+    certification_support,
+    paid_leave,
+    special_leave,
+    flex_time,
+    short_working_hours,
+    childcare_support,
+    maternity_leave,
+    parental_leave,
+    elder_care_support,
+    retirement_plan,
+    raw_benefits
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+)
+`
+
+type CreateJobBenefitsParams struct {
+	JobPostingID         uuid.UUID
+	SocialInsurance      bool
+	TransportAllowance   bool
+	HousingAllowance     bool
+	CompanyHousing       bool
+	RentSubsidy          bool
+	MealAllowance        bool
+	CafeteriaProvided    bool
+	TrainingSupport      bool
+	CertificationSupport bool
+	PaidLeave            bool
+	SpecialLeave         bool
+	FlexTime             bool
+	ShortWorkingHours    bool
+	ChildcareSupport     bool
+	MaternityLeave       bool
+	ParentalLeave        bool
+	ElderCareSupport     bool
+	RetirementPlan       bool
+	RawBenefits          string
+}
+
+// Benefits queries
+func (q *Queries) CreateJobBenefits(ctx context.Context, arg CreateJobBenefitsParams) error {
+	_, err := q.db.ExecContext(ctx, createJobBenefits,
+		arg.JobPostingID,
+		arg.SocialInsurance,
+		arg.TransportAllowance,
+		arg.HousingAllowance,
+		arg.CompanyHousing,
+		arg.RentSubsidy,
+		arg.MealAllowance,
+		arg.CafeteriaProvided,
+		arg.TrainingSupport,
+		arg.CertificationSupport,
+		arg.PaidLeave,
+		arg.SpecialLeave,
+		arg.FlexTime,
+		arg.ShortWorkingHours,
+		arg.ChildcareSupport,
+		arg.MaternityLeave,
+		arg.ParentalLeave,
+		arg.ElderCareSupport,
+		arg.RetirementPlan,
+		arg.RawBenefits,
+	)
+	return err
+}
+
+const createJobPosting = `-- name: CreateJobPosting :one
 INSERT INTO job_postings (
-    id,
+    company_id,
+    location_id,
     title,
-    company_name,
-    prefecture_code,
-    prefecture_name,
-    municipality,
+    job_name,
     summary_url,
     job_type,
     salary_min_amount,
     salary_max_amount,
     salary_unit,
-    salary_currency,
     salary_is_fixed,
-    posted_at,
-    job_name,
-    holiday_policy,
     raise,
     bonus,
     description,
     requirements,
-    holidays_per_year,
+    workplace_type,
     work_hours,
-    benefits
+    holidays_per_year,
+    holiday_policy,
+    posted_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23
-)
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19
+) RETURNING id
 `
 
 type CreateJobPostingParams struct {
-	ID              uuid.UUID
+	CompanyID       uuid.UUID
+	LocationID      uuid.UUID
 	Title           string
-	CompanyName     string
-	PrefectureCode  string
-	PrefectureName  string
-	Municipality    string
+	JobName         string
 	SummaryUrl      string
 	JobType         JobType
 	SalaryMinAmount int64
 	SalaryMaxAmount int64
 	SalaryUnit      SalaryType
-	SalaryCurrency  Currency
 	SalaryIsFixed   bool
-	PostedAt        time.Time
-	JobName         string
-	HolidayPolicy   string
 	Raise           sql.NullInt32
 	Bonus           sql.NullInt32
 	Description     string
 	Requirements    string
-	HolidaysPerYear sql.NullInt32
+	WorkplaceType   WorkplaceType
 	WorkHours       string
-	Benefits        string
+	HolidaysPerYear sql.NullInt32
+	HolidayPolicy   HolidayPolicy
+	PostedAt        time.Time
 }
 
-func (q *Queries) CreateJobPosting(ctx context.Context, arg CreateJobPostingParams) error {
-	_, err := q.db.ExecContext(ctx, createJobPosting,
-		arg.ID,
+// Job posting queries
+func (q *Queries) CreateJobPosting(ctx context.Context, arg CreateJobPostingParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, createJobPosting,
+		arg.CompanyID,
+		arg.LocationID,
 		arg.Title,
-		arg.CompanyName,
-		arg.PrefectureCode,
-		arg.PrefectureName,
-		arg.Municipality,
+		arg.JobName,
 		arg.SummaryUrl,
 		arg.JobType,
 		arg.SalaryMinAmount,
 		arg.SalaryMaxAmount,
 		arg.SalaryUnit,
-		arg.SalaryCurrency,
 		arg.SalaryIsFixed,
-		arg.PostedAt,
-		arg.JobName,
-		arg.HolidayPolicy,
 		arg.Raise,
 		arg.Bonus,
 		arg.Description,
 		arg.Requirements,
-		arg.HolidaysPerYear,
+		arg.WorkplaceType,
 		arg.WorkHours,
-		arg.Benefits,
+		arg.HolidaysPerYear,
+		arg.HolidayPolicy,
+		arg.PostedAt,
 	)
-	return err
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createLocation = `-- name: CreateLocation :one
+INSERT INTO locations (
+    prefecture_code,
+    prefecture_name,
+    municipality,
+    raw_location
+) VALUES (
+    $1, $2, $3, $4
+) ON CONFLICT (prefecture_code, municipality, raw_location)
+DO UPDATE SET created_at = locations.created_at
+RETURNING id
+`
+
+type CreateLocationParams struct {
+	PrefectureCode string
+	PrefectureName string
+	Municipality   string
+	RawLocation    string
+}
+
+// Location queries
+func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, createLocation,
+		arg.PrefectureCode,
+		arg.PrefectureName,
+		arg.Municipality,
+		arg.RawLocation,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getCompanyByName = `-- name: GetCompanyByName :one
+SELECT id, name, headquarters_prefecture_code, headquarters_prefecture_name, headquarters_municipality, headquarters_raw, created_at FROM companies WHERE name = $1 LIMIT 1
+`
+
+func (q *Queries) GetCompanyByName(ctx context.Context, name string) (Company, error) {
+	row := q.db.QueryRowContext(ctx, getCompanyByName, name)
+	var i Company
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.HeadquartersPrefectureCode,
+		&i.HeadquartersPrefectureName,
+		&i.HeadquartersMunicipality,
+		&i.HeadquartersRaw,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getJobBenefitByJobPostingID = `-- name: GetJobBenefitByJobPostingID :one
+SELECT
+    id,
+    job_posting_id,
+    social_insurance,
+    transport_allowance,
+    housing_allowance,
+    company_housing,
+    rent_subsidy,
+    meal_allowance,
+    cafeteria_provided,
+    training_support,
+    certification_support,
+    paid_leave,
+    special_leave,
+    flex_time,
+    short_working_hours,
+    childcare_support,
+    maternity_leave,
+    parental_leave,
+    elder_care_support,
+    retirement_plan,
+    raw_benefits,
+    created_at
+FROM job_benefits
+WHERE job_posting_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetJobBenefitByJobPostingID(ctx context.Context, jobPostingID uuid.UUID) (JobBenefit, error) {
+	row := q.db.QueryRowContext(ctx, getJobBenefitByJobPostingID, jobPostingID)
+	var i JobBenefit
+	err := row.Scan(
+		&i.ID,
+		&i.JobPostingID,
+		&i.SocialInsurance,
+		&i.TransportAllowance,
+		&i.HousingAllowance,
+		&i.CompanyHousing,
+		&i.RentSubsidy,
+		&i.MealAllowance,
+		&i.CafeteriaProvided,
+		&i.TrainingSupport,
+		&i.CertificationSupport,
+		&i.PaidLeave,
+		&i.SpecialLeave,
+		&i.FlexTime,
+		&i.ShortWorkingHours,
+		&i.ChildcareSupport,
+		&i.MaternityLeave,
+		&i.ParentalLeave,
+		&i.ElderCareSupport,
+		&i.RetirementPlan,
+		&i.RawBenefits,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getJobPostingByID = `-- name: GetJobPostingByID :one
 SELECT
-    id,
-    title,
-    company_name,
-    prefecture_code,
-    prefecture_name,
-    municipality,
-    summary_url,
-    job_type,
-    salary_min_amount,
-    salary_max_amount,
-    salary_unit,
-    salary_currency,
-    salary_is_fixed,
-    posted_at,
-    job_name,
-    holiday_policy,
-    raise,
-    bonus,
-    description,
-    requirements,
-    holidays_per_year,
-    work_hours,
-    benefits
-FROM job_postings
-WHERE id = $1
+    jp.id,
+    c.name AS company_name,
+    l.prefecture_code,
+    l.prefecture_name,
+    l.municipality,
+    l.raw_location,
+    jp.title,
+    jp.job_name,
+    jp.summary_url,
+    jp.job_type,
+    jp.salary_min_amount,
+    jp.salary_max_amount,
+    jp.salary_unit,
+    jp.salary_is_fixed,
+    jp.raise,
+    jp.bonus,
+    jp.description,
+    jp.requirements,
+    jp.workplace_type,
+    jp.work_hours,
+    jp.holidays_per_year,
+    jp.holiday_policy,
+    jp.posted_at,
+    jp.created_at
+FROM job_postings jp
+JOIN companies c ON jp.company_id = c.id
+JOIN locations l ON jp.location_id = l.id
+WHERE jp.id = $1 LIMIT 1
 `
 
 type GetJobPostingByIDRow struct {
 	ID              uuid.UUID
-	Title           string
 	CompanyName     string
 	PrefectureCode  string
 	PrefectureName  string
 	Municipality    string
+	RawLocation     string
+	Title           string
+	JobName         string
 	SummaryUrl      string
 	JobType         JobType
 	SalaryMinAmount int64
 	SalaryMaxAmount int64
 	SalaryUnit      SalaryType
-	SalaryCurrency  Currency
 	SalaryIsFixed   bool
-	PostedAt        time.Time
-	JobName         string
-	HolidayPolicy   string
 	Raise           sql.NullInt32
 	Bonus           sql.NullInt32
 	Description     string
 	Requirements    string
-	HolidaysPerYear sql.NullInt32
+	WorkplaceType   WorkplaceType
 	WorkHours       string
-	Benefits        string
+	HolidaysPerYear sql.NullInt32
+	HolidayPolicy   HolidayPolicy
+	PostedAt        time.Time
+	CreatedAt       time.Time
 }
 
 func (q *Queries) GetJobPostingByID(ctx context.Context, id uuid.UUID) (GetJobPostingByIDRow, error) {
@@ -160,28 +378,52 @@ func (q *Queries) GetJobPostingByID(ctx context.Context, id uuid.UUID) (GetJobPo
 	var i GetJobPostingByIDRow
 	err := row.Scan(
 		&i.ID,
-		&i.Title,
 		&i.CompanyName,
 		&i.PrefectureCode,
 		&i.PrefectureName,
 		&i.Municipality,
+		&i.RawLocation,
+		&i.Title,
+		&i.JobName,
 		&i.SummaryUrl,
 		&i.JobType,
 		&i.SalaryMinAmount,
 		&i.SalaryMaxAmount,
 		&i.SalaryUnit,
-		&i.SalaryCurrency,
 		&i.SalaryIsFixed,
-		&i.PostedAt,
-		&i.JobName,
-		&i.HolidayPolicy,
 		&i.Raise,
 		&i.Bonus,
 		&i.Description,
 		&i.Requirements,
-		&i.HolidaysPerYear,
+		&i.WorkplaceType,
 		&i.WorkHours,
-		&i.Benefits,
+		&i.HolidaysPerYear,
+		&i.HolidayPolicy,
+		&i.PostedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLocationByPrefectureAndMunicipality = `-- name: GetLocationByPrefectureAndMunicipality :one
+SELECT id, prefecture_code, prefecture_name, municipality, raw_location, created_at FROM locations WHERE prefecture_code = $1 AND municipality = $2 LIMIT 1
+`
+
+type GetLocationByPrefectureAndMunicipalityParams struct {
+	PrefectureCode string
+	Municipality   string
+}
+
+func (q *Queries) GetLocationByPrefectureAndMunicipality(ctx context.Context, arg GetLocationByPrefectureAndMunicipalityParams) (Location, error) {
+	row := q.db.QueryRowContext(ctx, getLocationByPrefectureAndMunicipality, arg.PrefectureCode, arg.Municipality)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.PrefectureCode,
+		&i.PrefectureName,
+		&i.Municipality,
+		&i.RawLocation,
+		&i.CreatedAt,
 	)
 	return i, err
 }

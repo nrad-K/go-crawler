@@ -44,7 +44,7 @@ func main() {
 	defer browserClient.Close()
 
 	// usecase初期化
-	crawler := usecase.NewPrefectureCrawlerUseCase(usecase.CrawlerArgs{
+	crawler := usecase.NewCrawlJobExecutorUseCase(usecase.CrawlerArgs{
 		Cfg:    &cfg,
 		Client: browserClient,
 		Repo:   repo,

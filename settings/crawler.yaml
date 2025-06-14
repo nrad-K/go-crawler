@@ -1,5 +1,4 @@
-# クロール戦略: "next_link"は「次へ」ボタンをたどる、"total_count"は総件数からページ数を計算
-strategy: "next_link"
+mode: manual
 # クロールを開始するベースURL
 base_url: "https://books.toscrape.com/"
 # 各リクエスト間の待機時間（秒）
@@ -11,19 +10,22 @@ timeout_seconds: 10
 # リクエストが失敗した際の再試行回数
 retry_count: 1
 # クロール結果を保存するディレクトリ
-output_directory: "./data/html"
+output_dir: "./tmp/html"
 
 # リクエストに追加するカスタムヘッダー
 headers:
   Accept-Language: "ja-JP"
   X-Custom-Header: "example"
 
+# クロール戦略: "next_link"は「次へ」ボタンをたどる、"total_count"は総件数からページ数を計算
+strategy: "next_link"
+
 # クロール対象要素のCSSセレクター設定
 selector:
   # 都道府県（またはカテゴリ）リンクのCSSセレクター
   prefecture_link_selector: "ul.nav > li > ul > li > a"
   # 次のページへのリンクのCSSセレクター（next_link戦略用）
-  pagination_selector: "li.next > a"
+  next_page_selector: "li.next > a"
   # 総件数を取得するためのCSSセレクター（total_count戦略用）
   total_count_selector: ""
   # 求人（または詳細情報）リンクのCSSセレクター
@@ -43,3 +45,6 @@ pagination:
   start: 1
   # 1ページあたりの項目数
   per_page: 20
+
+urls:
+  - https://books.toscrape.com/catalogue/category/books/mystery_3/index.html

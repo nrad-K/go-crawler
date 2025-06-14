@@ -13,46 +13,49 @@ import (
 	"github.com/google/uuid"
 )
 
-type Currency string
+type HolidayPolicy string
 
 const (
-	CurrencyJPY Currency = "JPY"
-	CurrencyUSD Currency = "USD"
+	HolidayPolicyCompleteTwoDaysAWeek HolidayPolicy = "CompleteTwoDaysAWeek"
+	HolidayPolicyTwoDaysAWeek         HolidayPolicy = "TwoDaysAWeek"
+	HolidayPolicyOneDayAWeek          HolidayPolicy = "OneDayAWeek"
+	HolidayPolicyShiftSystem          HolidayPolicy = "ShiftSystem"
+	HolidayPolicyUnknownHoliday       HolidayPolicy = "UnknownHoliday"
 )
 
-func (e *Currency) Scan(src interface{}) error {
+func (e *HolidayPolicy) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = Currency(s)
+		*e = HolidayPolicy(s)
 	case string:
-		*e = Currency(s)
+		*e = HolidayPolicy(s)
 	default:
-		return fmt.Errorf("unsupported scan type for Currency: %T", src)
+		return fmt.Errorf("unsupported scan type for HolidayPolicy: %T", src)
 	}
 	return nil
 }
 
-type NullCurrency struct {
-	Currency Currency
-	Valid    bool // Valid is true if Currency is not NULL
+type NullHolidayPolicy struct {
+	HolidayPolicy HolidayPolicy
+	Valid         bool // Valid is true if HolidayPolicy is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullCurrency) Scan(value interface{}) error {
+func (ns *NullHolidayPolicy) Scan(value interface{}) error {
 	if value == nil {
-		ns.Currency, ns.Valid = "", false
+		ns.HolidayPolicy, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.Currency.Scan(value)
+	return ns.HolidayPolicy.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullCurrency) Value() (driver.Value, error) {
+func (ns NullHolidayPolicy) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.Currency), nil
+	return string(ns.HolidayPolicy), nil
 }
 
 type JobType string
@@ -147,29 +150,115 @@ func (ns NullSalaryType) Value() (driver.Value, error) {
 	return string(ns.SalaryType), nil
 }
 
+type WorkplaceType string
+
+const (
+	WorkplaceTypeOnsite           WorkplaceType = "Onsite"
+	WorkplaceTypeRemote           WorkplaceType = "Remote"
+	WorkplaceTypeHybrid           WorkplaceType = "Hybrid"
+	WorkplaceTypeFullRemote       WorkplaceType = "FullRemote"
+	WorkplaceTypeUnknownWorkplace WorkplaceType = "UnknownWorkplace"
+)
+
+func (e *WorkplaceType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WorkplaceType(s)
+	case string:
+		*e = WorkplaceType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WorkplaceType: %T", src)
+	}
+	return nil
+}
+
+type NullWorkplaceType struct {
+	WorkplaceType WorkplaceType
+	Valid         bool // Valid is true if WorkplaceType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWorkplaceType) Scan(value interface{}) error {
+	if value == nil {
+		ns.WorkplaceType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WorkplaceType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWorkplaceType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WorkplaceType), nil
+}
+
+type Company struct {
+	ID                         uuid.UUID
+	Name                       string
+	HeadquartersPrefectureCode string
+	HeadquartersPrefectureName string
+	HeadquartersMunicipality   string
+	HeadquartersRaw            string
+	CreatedAt                  time.Time
+}
+
+type JobBenefit struct {
+	ID                   uuid.UUID
+	JobPostingID         uuid.UUID
+	SocialInsurance      bool
+	TransportAllowance   bool
+	HousingAllowance     bool
+	CompanyHousing       bool
+	RentSubsidy          bool
+	MealAllowance        bool
+	CafeteriaProvided    bool
+	TrainingSupport      bool
+	CertificationSupport bool
+	PaidLeave            bool
+	SpecialLeave         bool
+	FlexTime             bool
+	ShortWorkingHours    bool
+	ChildcareSupport     bool
+	MaternityLeave       bool
+	ParentalLeave        bool
+	ElderCareSupport     bool
+	RetirementPlan       bool
+	RawBenefits          string
+	CreatedAt            time.Time
+}
+
 type JobPosting struct {
 	ID              uuid.UUID
+	CompanyID       uuid.UUID
+	LocationID      uuid.UUID
 	Title           string
-	CompanyName     string
-	PrefectureCode  string
-	PrefectureName  string
-	Municipality    string
+	JobName         string
 	SummaryUrl      string
 	JobType         JobType
 	SalaryMinAmount int64
 	SalaryMaxAmount int64
 	SalaryUnit      SalaryType
-	SalaryCurrency  Currency
 	SalaryIsFixed   bool
-	PostedAt        time.Time
-	JobName         string
-	HolidayPolicy   string
 	Raise           sql.NullInt32
 	Bonus           sql.NullInt32
 	Description     string
 	Requirements    string
-	HolidaysPerYear sql.NullInt32
+	WorkplaceType   WorkplaceType
 	WorkHours       string
-	Benefits        string
+	HolidaysPerYear sql.NullInt32
+	HolidayPolicy   HolidayPolicy
+	PostedAt        time.Time
 	CreatedAt       time.Time
+}
+
+type Location struct {
+	ID             uuid.UUID
+	PrefectureCode string
+	PrefectureName string
+	Municipality   string
+	RawLocation    string
+	CreatedAt      time.Time
 }

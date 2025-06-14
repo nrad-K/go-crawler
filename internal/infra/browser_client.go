@@ -82,8 +82,8 @@ func (b *browserClient) GetHTML(ctx context.Context) (string, error) {
 }
 
 func (b *browserClient) SaveHTML(ctx context.Context, filename string, content string) error {
-	filePath := filepath.Join(b.cfg.OutputDirectory, filename)
-	if err := os.MkdirAll("saved_pages", os.ModePerm); err != nil {
+	filePath := filepath.Join(b.cfg.OutputDir, filename)
+	if err := os.MkdirAll(b.cfg.OutputDir, os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 

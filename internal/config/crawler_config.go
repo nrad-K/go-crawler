@@ -15,18 +15,27 @@ const (
 	CrawlByTotalCount CrawlStrategy = "total_count" // 件数を取得してページ数を計算
 )
 
+type CrawlMode string
+
+const (
+	Auto   CrawlMode = "auto"
+	Manual CrawlMode = "manual"
+)
+
 // CrawlerConfigはクローラーの動作設定をまとめる構造体です。
 type CrawlerConfig struct {
-	Strategy        CrawlStrategy     `yaml:"strategy" validate:"required,oneof=next_link total_count"` // クロール戦略（次へボタンをたどるか、総件数からページ数を計算するか）
-	BaseURL         string            `yaml:"base_url" validate:"required,url"`                         // クロールを開始するベースURL
-	SleepSeconds    int               `yaml:"sleep_seconds" validate:"min=1,max=60"`                    // 各リクエスト間の待機時間（秒）
-	TimeoutSeconds  int               `yaml:"timeout_seconds" validate:"min=1,max=300"`                 // リクエストのタイムアウト時間（秒）
-	UserAgent       string            `yaml:"user_agent" validate:"required,min=1"`                     // リクエストヘッダーに設定するUser-Agent
-	RetryCount      int               `yaml:"retry_count" validate:"min=0,max=5"`                       // リクエストが失敗した際の再試行回数
-	OutputDirectory string            `yaml:"output_directory" validate:"required,dirpath"`             // クロール結果を保存するディレクトリ
-	Headers         map[string]string `yaml:"headers"`                                                  // リクエストに追加するカスタムヘッダー
-	Selector        CrawlerSelector   `yaml:"selector" validate:"required"`                             // クロール対象要素のCSSセレクター設定
-	Pagination      PaginationConfig  `yaml:"pagination" validate:"required"`                           // ページネーションに関する設定
+	Mode           CrawlMode         `yaml:"mode" validate:"required,oneof=auto manual"`
+	Strategy       CrawlStrategy     `yaml:"strategy" validate:"required,oneof=next_link total_count url_list"` // クロール戦略（次へボタンをたどるか、総件数からページ数を計算するか）
+	BaseURL        string            `yaml:"base_url" validate:"url"`                                           // クロールを開始するベースURL
+	SleepSeconds   int               `yaml:"sleep_seconds" validate:"min=1,max=60"`                             // 各リクエスト間の待機時間（秒）
+	TimeoutSeconds int               `yaml:"timeout_seconds" validate:"min=1,max=300"`                          // リクエストのタイムアウト時間（秒）
+	UserAgent      string            `yaml:"user_agent" validate:"required,min=1"`                              // リクエストヘッダーに設定するUser-Agent
+	RetryCount     int               `yaml:"retry_count" validate:"min=0,max=5"`                                // リクエストが失敗した際の再試行回数
+	OutputDir      string            `yaml:"output_dir" validate:"required",dirpath"`                           // クロール結果を保存するディレクトリ
+	Headers        map[string]string `yaml:"headers"`                                                           // リクエストに追加するカスタムヘッダー
+	Selector       CrawlerSelector   `yaml:"selector" validate:"required"`                                      // クロール対象要素のCSSセレクター設定
+	Pagination     PaginationConfig  `yaml:"pagination" validate:"required"`                                    // ページネーションに関する設定
+	Urls           []string          `yaml:"urls"`                                                              // クロール対象のURLリスト（url_list戦略の場合必須）
 }
 
 // CrawlerSelectorはWebページから特定の要素を選択するためのCSSセレクターを定義します。
@@ -49,11 +58,11 @@ const (
 // Strategy Total Countの時にしか必要ない(NextLinkのときはnoneにする)
 // PaginationConfigはページネーションの動作に関する設定を定義します。
 type PaginationConfig struct {
-	Type            PaginationType `yaml:"type" validate:"required,oneof=query path segment none"`                      // ページネーションのタイプ
-	ParamIdentifier string         `yaml:"param_identifier" validate:"required_unless=Type none,min=1"`                 // ページネーションを識別するための文字列
-	PageFormat      string         `yaml:"page_format" validate:"required_if=Type path required_if=Type segment,min=1"` // ページ番号の書式指定 (path/segmentタイプ用)
-	Start           int            `yaml:"start" validate:"min=0"`                                                      // ページネーションの開始番号
-	PerPage         int            `yaml:"per_page" validate:"min=1,max=1000"`                                          // 1ページあたりの項目数
+	Type            PaginationType `yaml:"type" validate:"required,oneof=query path segment none"` // ページネーションのタイプ
+	ParamIdentifier string         `yaml:"param_identifier"`                                       // ページネーションを識別するための文字列
+	PageFormat      string         `yaml:"page_format"`                                            // ページ番号の書式指定 (path/segmentタイプ用)
+	Start           int            `yaml:"start" validate:"min=0"`                                 // ページネーションの開始番号
+	PerPage         int            `yaml:"per_page" validate:"min=1,max=1000"`                     // 1ページあたりの項目数
 }
 
 // バリデーターのインスタンス
@@ -78,13 +87,16 @@ func LoadCrawlerConfig(path string) (CrawlerConfig, error) {
 
 	// カスタムバリデーション
 	if cfg.Strategy == CrawlByTotalCount && cfg.Selector.TotalCountSelector == "" {
-		return CrawlerConfig{}, fmt.Errorf("total_count_selector required for total_count strategy")
+		return CrawlerConfig{}, fmt.Errorf("total_count戦略にはtotal_count_selectorが必要です")
 	}
 	if cfg.Strategy == CrawlByNextLink && cfg.Selector.NextPageSelector == "" {
-		return CrawlerConfig{}, fmt.Errorf("next_page_selector required for next_link strategy")
+		return CrawlerConfig{}, fmt.Errorf("next_link戦略にはnext_page_selectorが必要です")
+	}
+	if cfg.Mode == Manual && len(cfg.Urls) == 0 {
+		return CrawlerConfig{}, fmt.Errorf("url_list戦略にはurlsが必要です")
 	}
 	if cfg.Pagination.Type != None && cfg.Pagination.ParamIdentifier == "" {
-		return CrawlerConfig{}, fmt.Errorf("param_identifier required when pagination type is not none")
+		return CrawlerConfig{}, fmt.Errorf("ページネーションタイプがnone以外の場合はparam_identifierが必要です")
 	}
 
 	return cfg, nil
