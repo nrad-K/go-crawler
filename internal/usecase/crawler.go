@@ -23,7 +23,14 @@ import (
 
 // CrawlerUseCaseは、クローラーの実行ロジックを定義するインターフェースです。
 
-// CrawlerArgsは、クローラーユースケースを構築するための引数を保持します。
+// CrawlerArgsは、クローラーユースケースを構築するためのargsを保持します。
+//
+// フィールド:
+//
+//	Cfg    : クローラーの設定情報
+//	Client : ブラウザクライアント
+//	Repo   : クロールジョブリポジトリ
+//	Logger : ロガー
 type CrawlerArgs struct {
 	Cfg    *config.CrawlerConfig
 	Client infra.BrowserClient
@@ -38,6 +45,15 @@ type generateCrawlJobUseCase struct {
 	logger logger.AppLogger
 }
 
+// NewGenerateCrawlJobUseCaseはgenerateCrawlJobUseCaseのコンストラクタです。
+//
+// args:
+//
+//	args : CrawlerArgs構造体（設定・クライアント・リポジトリ・ロガー）
+//
+// return:
+//
+//	*generateCrawlJobUseCase : 生成されたユースケースインスタンス
 func NewGenerateCrawlJobUseCase(args CrawlerArgs) *generateCrawlJobUseCase {
 	return &generateCrawlJobUseCase{
 		cfg:    args.Cfg,
@@ -52,7 +68,15 @@ const (
 	batchSize    = 100
 )
 
-// Runは、クローラーのメイン実行ロジックです。
+// GenerateCrawlJobは、クローラーのメイン実行ロジックです。
+//
+// args:
+//
+//	ctx : コンテキスト
+//
+// return:
+//
+//	error : 実行中に発生したエラー
 func (u *generateCrawlJobUseCase) GenerateCrawlJob(ctx context.Context) error {
 	u.logger.Info("クローラーの実行を開始します: ベースURL=%s, Strategy=%s", u.cfg.BaseURL, u.cfg.Strategy)
 
@@ -90,6 +114,11 @@ func (u *generateCrawlJobUseCase) GenerateCrawlJob(ctx context.Context) error {
 	return nil
 }
 
+// listLinksByModeは、設定モードに応じて一覧ページのリンクを取得します。
+//
+// return:
+//
+//	[]string : 一覧ページのリンクリスト
 func (u *generateCrawlJobUseCase) listLinksByMode() []string {
 	listLinks := make([]string, 0, 100)
 
@@ -119,7 +148,16 @@ func (u *generateCrawlJobUseCase) listLinksByMode() []string {
 }
 
 // resolveURLは、与えられたURLをベースURLに対して解決し、絶対URLを返します。
-// targetURLが既に絶対URLであればそれを返し、相対URLであればベースURLに解決します。
+//
+// args:
+//
+//	baseURL   : ベースとなるURL
+//	targetURL : 解決したいターゲットURL
+//
+// return:
+//
+//	string : 解決された絶対URL
+//	error  : パースや解決に失敗した場合のエラー
 func (u *generateCrawlJobUseCase) resolveURL(baseURL, targetURL string) (string, error) {
 	parsedTarget, err := url.Parse(targetURL)
 	if err != nil {
@@ -139,7 +177,16 @@ func (u *generateCrawlJobUseCase) resolveURL(baseURL, targetURL string) (string,
 	return resolved.String(), nil
 }
 
-// 設定された戦略に基づいてクロールジョブを作成します。
+// processListLinkは、一覧ページのリンクを処理し、クロールジョブを作成します。
+//
+// args:
+//
+//	ctx  : コンテキスト
+//	link : 一覧ページのURL
+//
+// return:
+//
+//	error : 処理中に発生したエラー
 func (u *generateCrawlJobUseCase) processListLink(ctx context.Context, link string) error {
 	if err := u.client.Navigate(link); err != nil {
 		return fmt.Errorf("ぺージネーションページ %s へのナビゲートに失敗しました: %w", link, err)
@@ -156,6 +203,15 @@ func (u *generateCrawlJobUseCase) processListLink(ctx context.Context, link stri
 }
 
 // createCrawlJobsByStrategyは、設定されたStrategyに基づいてクロールジョブを作成します。
+//
+// args:
+//
+//	ctx : コンテキスト
+//
+// return:
+//
+//	int   : 作成したジョブ数
+//	error : エラー
 func (u *generateCrawlJobUseCase) createCrawlJobsByStrategy(ctx context.Context) (int, error) {
 	switch u.cfg.Strategy {
 
@@ -171,7 +227,15 @@ func (u *generateCrawlJobUseCase) createCrawlJobsByStrategy(ctx context.Context)
 }
 
 // createJobsByNextLinkは、次へのリンクを辿る戦略でクロールジョブを作成します。
-// ページネーションセレクタが存在する限り、詳細リンクを抽出し、ジョブを作成し、次のページへ遷移します。
+//
+// args:
+//
+//	ctx : コンテキスト
+//
+// return:
+//
+//	int   : 作成したジョブ数
+//	error : エラー
 func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int, error) {
 	jobCount := 0
 	pageNum := 1
@@ -265,6 +329,15 @@ func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int
 }
 
 // createJobsByTotalCountは、総件数からページ数を計算し、ページネーションURLを構築してクロールジョブを作成します。
+//
+// args:
+//
+//	ctx : コンテキスト
+//
+// return:
+//
+//	int   : 作成したジョブ数
+//	error : エラー
 func (u *generateCrawlJobUseCase) createJobsByTotalCount(ctx context.Context) (int, error) {
 	texts, err := u.client.ExtractText(u.cfg.Selector.TotalCountSelector)
 	if err != nil {
@@ -323,6 +396,15 @@ func (u *generateCrawlJobUseCase) createJobsByTotalCount(ctx context.Context) (i
 }
 
 // extractTotalCountは、テキストから合計件数を表す数値を正規表現で抽出し、カンマを除去して返します。
+//
+// args:
+//
+//	text : 合計件数が含まれるテキスト
+//
+// return:
+//
+//	int   : 抽出された合計件数
+//	error : 抽出や変換に失敗した場合のエラー
 func (u *generateCrawlJobUseCase) extractTotalCount(text string) (int, error) {
 	// 数字とカンマにマッチする正規表現。例: "1,234件" から "1,234" を抽出。
 	re := regexp.MustCompile(`[0-9,]+`)
@@ -343,6 +425,15 @@ func (u *generateCrawlJobUseCase) extractTotalCount(text string) (int, error) {
 }
 
 // createCrawlJobByURLは、指定されたURLからCrawlJobを作成し、リポジトリに保存します。
+//
+// args:
+//
+//	ctx  : コンテキスト
+//	link : クロール対象のURL
+//
+// return:
+//
+//	error : 保存や存在確認で発生したエラー
 func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, link string) error {
 	uParsed, err := url.Parse(link)
 	if err != nil {
@@ -373,7 +464,16 @@ func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, link 
 }
 
 // buildPaginatedURLは、ベースURLとページ番号に基づいてページネーションされたURLを構築します。
-// 設定されたページネーションタイプ（クエリパラメータ、パス、セグメント）に応じてURLを生成します。
+//
+// args:
+//
+//	baseURL : ページネーションの基準となるURL
+//	page    : ページ番号
+//
+// return:
+//
+//	string : 構築されたページネーションURL
+//	error  : URL構築に失敗した場合のエラー
 func (u *generateCrawlJobUseCase) buildPaginatedURL(baseURL string, page int) (string, error) {
 	uParsed, err := url.Parse(baseURL)
 	if err != nil {
@@ -417,7 +517,14 @@ func (u *generateCrawlJobUseCase) buildPaginatedURL(baseURL string, page int) (s
 }
 
 // normalizeToPageOneURLは、現在のURLをページネーションの最初のページ（またはページネーションなし）のURLに正規化します。
-// クエリパラメータやパスセグメントのページ番号を除去します。
+//
+// args:
+//
+//	rawURL : 正規化対象のURL
+//
+// return:
+//
+//	string : 正規化されたURL
 func (u *generateCrawlJobUseCase) normalizeToPageOneURL(rawURL string) string {
 	uParsed, err := url.Parse(rawURL)
 
@@ -465,7 +572,15 @@ type executeCrawlJobUseCase struct {
 	logger logger.AppLogger
 }
 
-// NewCrawlJobExecutorUseCaseは、CrawlJobExecutorUseCaseの新しいインスタンスを作成します。
+// NewExecuteCrawlJobUseCaseは、executeCrawlJobUseCaseの新しいインスタンスを作成します。
+//
+// args:
+//
+//	args : CrawlerArgs構造体（設定・クライアント・リポジトリ・ロガー）
+//
+// return:
+//
+//	*executeCrawlJobUseCase : 生成されたユースケースインスタンス
 func NewExecuteCrawlJobUseCase(args CrawlerArgs) *executeCrawlJobUseCase {
 	return &executeCrawlJobUseCase{
 		cfg:    args.Cfg,
@@ -479,12 +594,20 @@ var (
 	ErrNoPendingJobs = errors.New("pending job not found")
 )
 
-// Runは、CrawlJobExecutorUseCaseのメイン実行ロジックです。
+// ExecuteCrawlJobは、CrawlJobExecutorUseCaseのメイン実行ロジックです。
 // PENDING状態のCrawlJobを定期的に取得し、処理します。
+//
+// args:
+//
+//	ctx : コンテキスト
+//
+// return:
+//
+//	error : 実行中に発生したエラー
 func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 	u.logger.Info("クローラーを開始します")
 
-	var totalProcessedCount int32 // 処理されたジョブの総数
+	var totalProcessedJob int32 // 処理されたジョブの総数
 
 	for {
 		jobs, err := u.repo.FindListByStatus(ctx, batchSize, model.CrawlJobStatusPending)
@@ -500,18 +623,33 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 
 		for _, job := range jobs {
 			u.processCrawl(ctx, job)
-			totalProcessedCount++
+			totalProcessedJob++
 		}
 		// 短い間隔を置いて次のバッチをフェッチ
-		time.Sleep(3 * time.Second) // 必要に応じて調整
+		time.Sleep(5 * time.Second) // 必要に応じて調整
 	}
 
-	u.logger.Info("クローラーが完了しました。合計処理ジョブ数: %d", totalProcessedCount)
+	u.logger.Info("クローラーが完了しました。合計処理ジョブ数: %d件", totalProcessedJob)
 	return nil
 }
 
+// processCrawlは、1件のCrawlJobを実行し、HTML保存・ステータス更新を行います。
+//
+// args:
+//
+//	ctx : コンテキスト
+//	job : 対象のCrawlJob
+//
+// return:
+//
+//	error : 実行中に発生したエラー
 func (u *executeCrawlJobUseCase) processCrawl(ctx context.Context, job model.CrawlJob) error {
 	u.logger.Info("クロールジョブを処理中 ID: %s, URL: %s", job.ID.String(), job.URL.String())
+
+	if err := u.client.Navigate(job.URL.String()); err != nil {
+		u.logger.Error("ナビゲーションに失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		return fmt.Errorf("ナビゲーションに失敗しました: %w", err)
+	}
 
 	if u.cfg.Selector.TabClickSelector != "" {
 		u.logger.Info("タブをクリックします。セレクター: %s", u.cfg.Selector.TabClickSelector)

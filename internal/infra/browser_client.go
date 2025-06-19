@@ -10,6 +10,7 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
+// BrowserClientは、クローリングで利用するブラウザ操作のインターフェースです。
 type BrowserClient interface {
 	Click(selector string) error
 	GetHTML() (string, error)
@@ -30,10 +31,17 @@ type browserClient struct {
 	context playwright.BrowserContext
 }
 
+// NewBrowserClientは、Playwrightを用いたbrowserClientを生成します。
+//
+// args:
+//
+//	cfg: クローラー設定
+//
+// return:
+//
+//	*browserClient: 生成されたクライアント
+//	error: 失敗時のエラー
 func NewBrowserClient(cfg *config.CrawlerConfig) (*browserClient, error) {
-	if err := playwright.Install(); err != nil {
-		return nil, fmt.Errorf("playwrightのインストールに失敗しました: %w", err)
-	}
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("playwrightの起動に失敗しました: %w", err)
@@ -81,18 +89,39 @@ func NewBrowserClient(cfg *config.CrawlerConfig) (*browserClient, error) {
 }
 
 func setupResourceBlocking(context playwright.BrowserContext) error {
-	return context.Route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf,eot,otf,css}", func(route playwright.Route) {
+	return context.Route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf,eot,otf}", func(route playwright.Route) {
 		route.Abort()
 	})
 }
 
+// Navigateは、指定したURLにブラウザを遷移させます。
+//
+// args:
+//
+//	url: 遷移先のURL
+//
+// return:
+//
+//	error: 失敗時のエラー
 func (b *browserClient) Navigate(url string) error {
-	if _, err := b.page.Goto(url); err != nil {
+	if _, err := b.page.Goto(url, playwright.PageGotoOptions{
+		Timeout:   playwright.Float(float64(b.cfg.CrawlTimeoutSeconds * 1000)),
+		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+	}); err != nil {
 		return fmt.Errorf("ナビゲーションに失敗しました: %v", err)
 	}
 	return nil
 }
 
+// Clickは、指定したセレクタの要素をクリックします。
+//
+// args:
+//
+//	selector: クリック対象のCSSセレクタ
+//
+// return:
+//
+//	error: 失敗時のエラー
 func (b *browserClient) Click(selector string) error {
 	locator := b.page.Locator(selector).First()
 	if err := locator.WaitFor(); err != nil {
@@ -104,7 +133,19 @@ func (b *browserClient) Click(selector string) error {
 	return nil
 }
 
+// GetHTMLは、現在のページのHTMLを取得します。
+//
+// args: なし
+// return:
+//
+//	string: HTML文字列
+//	error: 失敗時のエラー
 func (b *browserClient) GetHTML() (string, error) {
+	if err := b.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateDomcontentloaded,
+	}); err != nil {
+		return "", fmt.Errorf("ページ読み込み待機に失敗しました: %w", err)
+	}
 	html, err := b.page.Content()
 	if err != nil {
 		return "", fmt.Errorf("ページコンテンツの取得に失敗しました: %w", err)
@@ -112,6 +153,16 @@ func (b *browserClient) GetHTML() (string, error) {
 	return html, nil
 }
 
+// SaveHTMLは、HTMLをファイルに保存します。
+//
+// args:
+//
+//	filename: 保存ファイル名
+//	content: HTML文字列
+//
+// return:
+//
+//	error: 失敗時のエラー
 func (b *browserClient) SaveHTML(filename string, content string) error {
 	filePath := filepath.Join(b.cfg.OutputDir, filename)
 	if err := os.MkdirAll(b.cfg.OutputDir, os.ModePerm); err != nil {
@@ -125,6 +176,13 @@ func (b *browserClient) SaveHTML(filename string, content string) error {
 	return nil
 }
 
+// CurrentURLは、現在のページのURLを返します。
+//
+// args: なし
+// return:
+//
+//	*url.URL: 現在のURL
+//	error: 失敗時のエラー
 func (b *browserClient) CurrentURL() (*url.URL, error) {
 	rawURL := b.page.URL()
 	parsed, err := url.Parse(rawURL)
@@ -134,7 +192,17 @@ func (b *browserClient) CurrentURL() (*url.URL, error) {
 	return parsed, nil
 }
 
+// Closeは、ブラウザとPlaywrightインスタンスを閉じます。
+//
+// args: なし
+// return:
+//
+//	error: 失敗時のエラー
 func (b *browserClient) Close() error {
+	if err := b.context.Close(); err != nil {
+		return fmt.Errorf("ブラウザコンテキストのクローズに失敗しました: %w", err)
+	}
+
 	if err := b.browser.Close(); err != nil {
 		return fmt.Errorf("ブラウザを閉じれませんでした: %w", err)
 	}
@@ -142,8 +210,18 @@ func (b *browserClient) Close() error {
 		return fmt.Errorf("playwrightの停止に失敗しました: %w", err)
 	}
 	return nil
-
 }
+
+// ExtractTextは、指定したセレクタに一致する要素のテキストを抽出します。
+//
+// args:
+//
+//	selector: CSSセレクタ
+//
+// return:
+//
+//	[]string: テキストのリスト
+//	error: 失敗時のエラー
 func (b *browserClient) ExtractText(selector string) ([]string, error) {
 	locator := b.page.Locator(selector)
 	if err := locator.First().WaitFor(); err != nil {
@@ -167,6 +245,17 @@ func (b *browserClient) ExtractText(selector string) ([]string, error) {
 	return texts, nil
 }
 
+// ExtractAttributeは、指定したセレクタに一致する要素から属性値を抽出します。
+//
+// args:
+//
+//	selector: CSSセレクタ
+//	attr: 属性名
+//
+// return:
+//
+//	[]string: 属性値のリスト
+//	error: 失敗時のエラー
 func (b *browserClient) ExtractAttribute(selector string, attr string) ([]string, error) {
 	locator := b.page.Locator(selector)
 	if err := locator.First().WaitFor(); err != nil {
@@ -191,6 +280,16 @@ func (b *browserClient) ExtractAttribute(selector string, attr string) ([]string
 	return values, nil
 }
 
+// Existsは、指定したセレクタに一致する要素が存在するか判定します。
+//
+// args:
+//
+//	selector: CSSセレクタ
+//
+// return:
+//
+//	bool: 存在する場合はtrue
+//	error: 失敗時のエラー
 func (b *browserClient) Exists(selector string) (bool, error) {
 	count, err := b.page.Locator(selector).Count()
 	if err != nil {

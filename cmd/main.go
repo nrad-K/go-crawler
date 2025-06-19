@@ -44,7 +44,7 @@ func main() {
 	defer browserClient.Close()
 
 	// usecase初期化
-	crawler := usecase.NewGenerateCrawlJobUseCase(usecase.CrawlerArgs{
+	crawler := usecase.NewExecuteCrawlJobUseCase(usecase.CrawlerArgs{
 		Cfg:    &cfg,
 		Client: browserClient,
 		Repo:   repo,
@@ -53,7 +53,7 @@ func main() {
 
 	// 実行
 	appLogger.Info("クローラーを実行します")
-	if err := crawler.GenerateCrawlJob(ctx); err != nil {
+	if err := crawler.ExecuteCrawlJob(ctx); err != nil {
 		appLogger.Error("クローラー実行中にエラー: %v", err)
 		os.Exit(1)
 	}

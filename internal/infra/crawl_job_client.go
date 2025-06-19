@@ -10,16 +10,36 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// crawlJobClientは、Redisを用いたCrawlJobRepositoryの実装です。
 type crawlJobClient struct {
 	redis *redis.Client
 }
 
+// NewCrawlJobClientは、crawlJobClientの新しいインスタンスを作成します。
+//
+// args:
+//
+//	rds: Redisクライアント
+//
+// return:
+//
+//	repository.CrawlJobRepository: 生成されたリポジトリ実装
 func NewCrawlJobClient(rds *redis.Client) repository.CrawlJobRepository {
 	return &crawlJobClient{
 		redis: rds,
 	}
 }
 
+// Saveは、CrawlJobをRedisに保存します。
+//
+// args:
+//
+//	ctx: コンテキスト
+//	job: 保存するCrawlJob
+//
+// return:
+//
+//	error: 保存に失敗した場合のエラー
 func (r *crawlJobClient) Save(ctx context.Context, job model.CrawlJob) error {
 	data, err := json.Marshal(job)
 	if err != nil {
@@ -38,6 +58,16 @@ func (r *crawlJobClient) Save(ctx context.Context, job model.CrawlJob) error {
 	return nil
 }
 
+// Deleteは、指定したCrawlJobをRedisから削除します。
+//
+// args:
+//
+//	ctx: コンテキスト
+//	job: 削除対象のCrawlJob
+//
+// return:
+//
+//	error: 削除に失敗した場合のエラー
 func (r *crawlJobClient) Delete(ctx context.Context, job model.CrawlJob) error {
 	key, err := r.generateJobKey(job)
 	if err != nil {
@@ -49,6 +79,18 @@ func (r *crawlJobClient) Delete(ctx context.Context, job model.CrawlJob) error {
 	return nil
 }
 
+// FindListByStatusは、指定したステータスのCrawlJobをRedisから取得します。
+//
+// args:
+//
+//	ctx: コンテキスト
+//	size: 取得する件数
+//	status: 対象のジョブステータス
+//
+// return:
+//
+//	[]model.CrawlJob: 取得したジョブのリスト
+//	error: 取得に失敗した場合のエラー
 func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status model.CrawlJobStatus) ([]model.CrawlJob, error) {
 	var jobs []model.CrawlJob
 	var cursor uint64
@@ -100,6 +142,17 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 	return jobs, nil
 }
 
+// Existsは、指定したCrawlJobがRedisに存在するか確認します。
+//
+// args:
+//
+//	ctx: コンテキスト
+//	job: 存在確認するCrawlJob
+//
+// return:
+//
+//	bool: 存在する場合はtrue
+//	error: 確認に失敗した場合のエラー
 func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, error) {
 	key, err := r.generateJobKey(job)
 	if err != nil {
@@ -112,6 +165,16 @@ func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, 
 	return exists > 0, nil
 }
 
+// generateJobKeyは、ジョブのステータスに応じたRedisキーを生成します。
+//
+// args:
+//
+//	job: 対象のCrawlJob
+//
+// return:
+//
+//	string: 生成されたキー
+//	error: 生成に失敗した場合のエラー
 func (r *crawlJobClient) generateJobKey(job model.CrawlJob) (string, error) {
 	var key string
 	switch job.Status {
@@ -128,14 +191,41 @@ func (r *crawlJobClient) generateJobKey(job model.CrawlJob) (string, error) {
 	return key, nil
 }
 
+// generateSuccessJobKeyは、成功ジョブ用のRedisキーを生成します。
+//
+// args:
+//
+//	url: 対象URL
+//
+// return:
+//
+//	string: 生成されたキー
 func (r *crawlJobClient) generateSuccessJobKey(url string) string {
 	return fmt.Sprintf("success_job: %s", url)
 }
 
+// generateFailedJobKeyは、失敗ジョブ用のRedisキーを生成します。
+//
+// args:
+//
+//	url: 対象URL
+//
+// return:
+//
+//	string: 生成されたキー
 func (r *crawlJobClient) generateFailedJobKey(url string) string {
 	return fmt.Sprintf("failed_job: %s", url)
 }
 
+// generatePendingJobKeyは、保留ジョブ用のRedisキーを生成します。
+//
+// args:
+//
+//	url: 対象URL
+//
+// return:
+//
+//	string: 生成されたキー
 func (r *crawlJobClient) generatePendingJobKey(url string) string {
 	return fmt.Sprintf("pending_job:%s", url)
 }
