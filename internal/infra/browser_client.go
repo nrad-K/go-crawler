@@ -1,7 +1,6 @@
 package infra
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,15 +11,14 @@ import (
 )
 
 type BrowserClient interface {
-	Click(ctx context.Context, selector string) error
-	GetHTML(ctx context.Context) (string, error)
-	SaveHTML(ctx context.Context, filename string, content string) error
-	GetCurrentURL(ctx context.Context) (*url.URL, error)
-	Navigate(ctx context.Context, url string) error
+	Click(selector string) error
+	GetHTML() (string, error)
+	SaveHTML(filename string, content string) error
+	CurrentURL() (*url.URL, error)
+	Navigate(url string) error
 	ExtractText(selector string) ([]string, error)
 	ExtractAttribute(selector, attr string) ([]string, error)
 	Exists(selector string) (bool, error)
-	NewPage(ctx context.Context, url string) (BrowserClient, error)
 	Close() error
 }
 
@@ -32,7 +30,7 @@ type browserClient struct {
 	context playwright.BrowserContext
 }
 
-func NewBrowserClient(cfg *config.CrawlerConfig) (BrowserClient, error) {
+func NewBrowserClient(cfg *config.CrawlerConfig) (*browserClient, error) {
 	if err := playwright.Install(); err != nil {
 		return nil, fmt.Errorf("playwrightのインストールに失敗しました: %w", err)
 	}
@@ -59,11 +57,15 @@ func NewBrowserClient(cfg *config.CrawlerConfig) (BrowserClient, error) {
 	}
 
 	if err := setupResourceBlocking(context); err != nil {
+		context.Close()
+		browser.Close()
+		pw.Stop()
 		return nil, fmt.Errorf("リソースブロックの設定に失敗しました: %w", err)
 	}
 
 	page, err := context.NewPage()
 	if err != nil {
+		context.Close()
 		browser.Close()
 		pw.Stop()
 		return nil, fmt.Errorf("ページの作成に失敗しました: %w", err)
@@ -84,45 +86,14 @@ func setupResourceBlocking(context playwright.BrowserContext) error {
 	})
 }
 
-func (b *browserClient) NewPage(ctx context.Context, url string) (BrowserClient, error) {
-	context, err := b.browser.NewContext(playwright.BrowserNewContextOptions{
-		ExtraHttpHeaders: b.cfg.Headers,
-		UserAgent:        &b.cfg.UserAgent,
-	})
-	if err != nil {
-		context.Close()
-		return nil, fmt.Errorf("ブラウザコンテキストの作成に失敗しました: %w", err)
-	}
-	page, err := context.NewPage()
-	if err != nil {
-		context.Close()
-		return nil, fmt.Errorf("新しいページの作成に失敗しました: %w", err)
-	}
-
-	if _, err := page.Goto(url, playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateNetworkidle,
-	}); err != nil {
-		page.Close()
-		context.Close()
-		return nil, fmt.Errorf("ナビゲーションに失敗しました: %v", err)
-	}
-
-	return &browserClient{
-		pw:      b.pw,
-		browser: b.browser,
-		cfg:     b.cfg,
-		context: context,
-		page:    page,
-	}, nil
-}
-func (b *browserClient) Navigate(ctx context.Context, url string) error {
+func (b *browserClient) Navigate(url string) error {
 	if _, err := b.page.Goto(url); err != nil {
 		return fmt.Errorf("ナビゲーションに失敗しました: %v", err)
 	}
 	return nil
 }
 
-func (b *browserClient) Click(ctx context.Context, selector string) error {
+func (b *browserClient) Click(selector string) error {
 	locator := b.page.Locator(selector).First()
 	if err := locator.WaitFor(); err != nil {
 		return fmt.Errorf("セレクター '%s' の可視状態待機に失敗しました: %w", selector, err)
@@ -133,7 +104,7 @@ func (b *browserClient) Click(ctx context.Context, selector string) error {
 	return nil
 }
 
-func (b *browserClient) GetHTML(ctx context.Context) (string, error) {
+func (b *browserClient) GetHTML() (string, error) {
 	html, err := b.page.Content()
 	if err != nil {
 		return "", fmt.Errorf("ページコンテンツの取得に失敗しました: %w", err)
@@ -141,7 +112,7 @@ func (b *browserClient) GetHTML(ctx context.Context) (string, error) {
 	return html, nil
 }
 
-func (b *browserClient) SaveHTML(ctx context.Context, filename string, content string) error {
+func (b *browserClient) SaveHTML(filename string, content string) error {
 	filePath := filepath.Join(b.cfg.OutputDir, filename)
 	if err := os.MkdirAll(b.cfg.OutputDir, os.ModePerm); err != nil {
 		return fmt.Errorf("ディレクトリの作成に失敗しました: %w", err)
@@ -154,7 +125,7 @@ func (b *browserClient) SaveHTML(ctx context.Context, filename string, content s
 	return nil
 }
 
-func (b *browserClient) GetCurrentURL(ctx context.Context) (*url.URL, error) {
+func (b *browserClient) CurrentURL() (*url.URL, error) {
 	rawURL := b.page.URL()
 	parsed, err := url.Parse(rawURL)
 	if err != nil {

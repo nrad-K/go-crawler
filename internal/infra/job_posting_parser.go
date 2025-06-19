@@ -26,7 +26,7 @@ type JobPostingParser interface {
 type jobPostingParser struct {
 }
 
-func NewJobPostingParser() JobPostingParser {
+func NewJobPostingParser() *jobPostingParser {
 	return &jobPostingParser{}
 }
 

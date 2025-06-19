@@ -17,7 +17,7 @@ type htmlDocument struct {
 	doc *goquery.Document
 }
 
-func NewHTMLDocument(html string) (HTMLDocument, error) {
+func NewHTMLDocument(html string) (*htmlDocument, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err

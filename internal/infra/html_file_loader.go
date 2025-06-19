@@ -14,7 +14,7 @@ type HTMLFileLoader interface {
 type htmlFileLoader struct {
 }
 
-func NewHTMLFileLoader() HTMLFileLoader {
+func NewHTMLFileLoader() *htmlFileLoader {
 	return &htmlFileLoader{}
 }
 

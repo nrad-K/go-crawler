@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/nrad-K/go-crawler/internal/db"
 	"github.com/nrad-K/go-crawler/internal/domain/model"
-	"github.com/nrad-K/go-crawler/internal/domain/repository"
 )
 
 type JobPostingQuery interface {
@@ -24,7 +23,7 @@ type jobPositingClient struct {
 	db JobPostingQuery
 }
 
-func NewJobPostingClient(db JobPostingQuery) repository.JobPostingRepository {
+func NewJobPostingClient(db JobPostingQuery) *jobPositingClient {
 	return &jobPositingClient{db: db}
 }
 
