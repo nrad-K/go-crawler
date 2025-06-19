@@ -2,12 +2,14 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +18,7 @@ import (
 	"github.com/nrad-K/go-crawler/internal/domain/repository"
 	"github.com/nrad-K/go-crawler/internal/infra"
 	"github.com/nrad-K/go-crawler/internal/logger"
+	"golang.org/x/sync/errgroup"
 )
 
 // CrawlerUseCaseは、クローラーの実行ロジックを定義するインターフェースです。
@@ -31,17 +34,15 @@ type CrawlerArgs struct {
 	Logger logger.AppLogger
 }
 
-// PrefectureCrawlerUseCaseは、都道府県ページをクロールし、CrawlJobを作成するユースケースです。
-type PrefectureCrawlerUseCase struct {
+type queueCrawlJobUseCase struct {
 	cfg    *config.CrawlerConfig
 	client infra.BrowserClient
 	repo   repository.CrawlJobRepository
 	logger logger.AppLogger
 }
 
-// NewPrefectureCrawlerUseCaseは、PrefectureCrawlerUseCaseの新しいインスタンスを作成します。
-func NewPrefectureCrawlerUseCase(args CrawlerArgs) CrawlerUseCase {
-	return &PrefectureCrawlerUseCase{
+func NewQueueCrawlJobUseCase(args CrawlerArgs) CrawlerUseCase {
+	return &queueCrawlJobUseCase{
 		cfg:    args.Cfg,
 		client: args.Client,
 		repo:   args.Repo,
@@ -49,80 +50,81 @@ func NewPrefectureCrawlerUseCase(args CrawlerArgs) CrawlerUseCase {
 	}
 }
 
-// Runは、都道府県クローラーのメイン実行ロジックです。
-// ベースURLにナビゲートし、都道府県リンクを抽出し、それぞれの都道府県を処理します。
-func (u *PrefectureCrawlerUseCase) Run(ctx context.Context) error {
-	u.logger.Info("都道府県クローラーを開始します: ベースURL=%s, 戦略=%s", u.cfg.BaseURL, u.cfg.Strategy)
+const (
+	maxListLinks = 100
+	batchSize    = 100
+)
+
+// Runは、クローラーのメイン実行ロジックです。
+func (u *queueCrawlJobUseCase) Run(ctx context.Context) error {
+	u.logger.Info("クローラーの実行を開始します: ベースURL=%s, Strategy=%s", u.cfg.BaseURL, u.cfg.Strategy)
 
 	// ベースURLに遷移
-	var prefectureLinks []string
+	listLinks := u.getListLinksByMode(ctx)
 
-	switch u.cfg.Mode {
-	case config.Manual:
-		prefectureLinks = u.cfg.Urls
-	default:
-		if err := u.client.Navigate(ctx, u.cfg.BaseURL); err != nil {
-			u.logger.Error("ベースURLへのナビゲーションに失敗しました: %s, エラー: %v", u.cfg.BaseURL, err)
-			return fmt.Errorf("ベースURL %s へのナビゲーションに失敗しました: %w", u.cfg.BaseURL, err)
-		}
-		links, err := u.client.ExtractAttribute(u.cfg.Selector.PrefectureLinkSelector, "href")
-		prefectureLinks = links
-		if err != nil {
-			u.logger.Error("都道府県リンクの抽出に失敗しました: セレクター=%s, エラー: %v", u.cfg.Selector.PrefectureLinkSelector, err)
-			return fmt.Errorf("都道府県リンクの抽出に失敗しました: %w", err)
-		}
-	}
-
-	// 都道府県リンクを抽出
-	u.logger.Info("都道府県リンクを%d件見つけました", len(prefectureLinks))
+	// 一覧ページのリンクを抽出
+	u.logger.Info("一覧ページのリンクを%d件見つけました", len(listLinks))
 
 	successCount := 0
-	// 都道府県リンクの処理
-	for i, prefectureLink := range prefectureLinks {
+	// 一覧リンクの処理
+	for i, link := range listLinks {
 		// BaseURLを基準にしてリンクを解決
-		resolvedLink, err := u.resolveURL(u.cfg.BaseURL, prefectureLink)
+		resolvedLink, err := u.resolveURL(u.cfg.BaseURL, link)
 		if err != nil {
-			u.logger.Error("都道府県リンクの解決に失敗しました: %s, エラー: %v", prefectureLink, err)
+			u.logger.Error("ぺージネーションページのリンクの解決に失敗しました: %s, エラー: %v", link, err)
 			continue
 		}
 
-		u.logger.Info("都道府県を処理中: %d/%d, リンク: %s", i+1, len(prefectureLinks), resolvedLink)
+		u.logger.Info("一覧ページのリンクを処理中: %d/%d, リンク: %s", i+1, len(listLinks), resolvedLink)
 
-		time.Sleep(time.Duration(u.cfg.SleepSeconds) * time.Second)
-
-		ctxTimeout, cancel := context.WithTimeout(ctx, time.Duration(u.cfg.TimeoutSeconds)*time.Second)
-		defer cancel()
-
-		var procErr error
-		for retry := 0; retry < u.cfg.RetryCount; retry++ {
-			procErr = u.processPrefecture(ctxTimeout, resolvedLink)
-			if procErr == nil {
-				break
-			}
-			u.logger.Warn("リトライ中: %d/%d, エラー: %v", retry+1, u.cfg.RetryCount, procErr)
-			time.Sleep(1 * time.Second)
-		}
-
-		if procErr != nil {
-			u.logger.Error("都道府県の処理に失敗しました: %d, リンク: %s, エラー: %v", i+1, resolvedLink, procErr)
+		if err := u.processListLink(ctx, resolvedLink); err != nil {
+			u.logger.Error("一覧ページのリンクの処理に失敗しました: %d, リンク: %s, エラー: %v", i+1, resolvedLink, err)
 			continue
 		}
+
+		time.Sleep(time.Duration(u.cfg.CrawlSleepSeconds) * time.Second)
 		successCount++
 	}
 
-	u.logger.Info("都道府県クローラーが完了しました: 成功数=%d/%d", successCount, len(prefectureLinks))
+	u.logger.Info("クローラーの実行が完了しました: 成功数=%d/%d", successCount, len(listLinks))
 
 	if successCount == 0 {
-		return fmt.Errorf("すべての都道府県の処理に失敗しました")
+		return fmt.Errorf("すべてのリンクの処理に失敗しました")
 	}
 
+	u.logger.Info("クローラーの実行が完了しました: 成功数=%d/%d", successCount, len(listLinks))
 	return nil
+}
+
+func (u *queueCrawlJobUseCase) getListLinksByMode(ctx context.Context) []string {
+	listLinks := make([]string, maxListLinks)
+
+	switch u.cfg.Mode {
+	case config.Manual:
+		listLinks = u.cfg.Urls
+	case config.Auto:
+		if err := u.client.Navigate(ctx, u.cfg.BaseURL); err != nil {
+			u.logger.Error("べースURLへのナビゲーションに失敗しました: %s, エラー: %v", u.cfg.BaseURL, err)
+			return listLinks
+		}
+
+		links, err := u.client.ExtractAttribute(u.cfg.Selector.ListLinksSelector, "href")
+		listLinks = links
+		if err != nil {
+			u.logger.Error("一覧ページのリンクの抽出に失敗しました: セレクター=%s, エラー: %v", u.cfg.Selector.ListLinksSelector, err)
+			return listLinks
+		}
+	default:
+		u.logger.Error("サポートされていないモードです")
+		return listLinks
+	}
+	return listLinks
 }
 
 // resolveURLは、与えられたURLをベースURLに対して解決し、絶対URLを返します。
 // targetURLが既に絶対URLであればそれを返し、相対URLであればベースURLに解決します。
-func (u *PrefectureCrawlerUseCase) resolveURL(baseURL, targetURL string) (string, error) {
-	parsed, err := url.Parse(targetURL)
+func (u *queueCrawlJobUseCase) resolveURL(baseURL, targetURL string) (string, error) {
+	parsedTarget, err := url.Parse(targetURL)
 	if err != nil {
 		return "", fmt.Errorf("ターゲットURL %s のパースに失敗しました: %w", targetURL, err)
 	}
@@ -132,48 +134,45 @@ func (u *PrefectureCrawlerUseCase) resolveURL(baseURL, targetURL string) (string
 		return "", fmt.Errorf("ベースURL %s のパースに失敗しました: %w", u.cfg.BaseURL, err)
 	}
 
-	if parsed.IsAbs() {
-		return parsed.String(), nil
+	if parsedTarget.IsAbs() {
+		return parsedTarget.String(), nil
 	}
 
-	resolved := parsedBase.ResolveReference(parsed)
+	resolved := parsedBase.ResolveReference(parsedTarget)
 	return resolved.String(), nil
 }
 
-// processPrefectureは、指定された都道府県リンクのページにナビゲートし、
 // 設定された戦略に基づいてクロールジョブを作成します。
-func (u *PrefectureCrawlerUseCase) processPrefecture(ctx context.Context, prefectureLink string) error {
-	// prefectureLinkは絶対URLの文字列として渡される
-	if err := u.client.Navigate(ctx, prefectureLink); err != nil {
-		return fmt.Errorf("都道府県ページ %s へのナビゲートに失敗しました: %w", prefectureLink, err)
+func (u *queueCrawlJobUseCase) processListLink(ctx context.Context, link string) error {
+	if err := u.client.Navigate(ctx, link); err != nil {
+		return fmt.Errorf("ぺージネーションページ %s へのナビゲートに失敗しました: %w", link, err)
 	}
 
 	jobCount, err := u.createCrawlJobsByStrategy(ctx)
 	if err != nil {
-		return fmt.Errorf("都道府県 %s のクロールジョブ作成に失敗しました: %w", prefectureLink, err)
+		return fmt.Errorf("%s のクロールジョブ作成に失敗しました: %w", link, err)
 	}
 
-	u.logger.Info("求人情報を%d件作成しました: 都道府県リンク: %s", jobCount, prefectureLink)
+	u.logger.Info("クロールジョブを%d件作成しました: ぺージネーションページのリンク: %s", jobCount, link)
 
 	return nil
 }
 
-// createCrawlJobsByStrategyは、設定されたクロール戦略に基づいてクロールジョブを作成します。
-func (u *PrefectureCrawlerUseCase) createCrawlJobsByStrategy(ctx context.Context) (int, error) {
+// createCrawlJobsByStrategyは、設定されたStrategyに基づいてクロールジョブを作成します。
+func (u *queueCrawlJobUseCase) createCrawlJobsByStrategy(ctx context.Context) (int, error) {
 	switch u.cfg.Strategy {
 	case config.CrawlByNextLink:
 		return u.createJobsByNextLink(ctx)
 	case config.CrawlByTotalCount:
 		return u.createJobsByTotalCount(ctx)
-	// yaml loadの際にvalidation あるので基本的にはdefaultにならない
 	default:
-		return 0, fmt.Errorf("サポートされていないクロール戦略です: %s", u.cfg.Strategy)
+		return 0, fmt.Errorf("サポートされていないStrategyです: %s", u.cfg.Strategy)
 	}
 }
 
 // createJobsByNextLinkは、次へのリンクを辿る戦略でクロールジョブを作成します。
 // ページネーションセレクタが存在する限り、詳細リンクを抽出し、ジョブを作成し、次のページへ遷移します。
-func (u *PrefectureCrawlerUseCase) createJobsByNextLink(ctx context.Context) (int, error) {
+func (u *queueCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int, error) {
 	jobCount := 0
 	pageNum := 1
 
@@ -187,44 +186,76 @@ func (u *PrefectureCrawlerUseCase) createJobsByNextLink(ctx context.Context) (in
 			return jobCount, fmt.Errorf("ページ%dで現在のURLの取得に失敗しました: %w", pageNum, err)
 		}
 
-		links, err := u.client.ExtractAttribute(u.cfg.Selector.JobLinkSelector, "href")
+		links, err := u.client.ExtractAttribute(u.cfg.Selector.DetailLinksSelector, "href")
 		if err != nil {
-			u.logger.Error("ページ%dで詳細リンクの抽出に失敗しました: エラー: %v", pageNum, err)
+			u.logger.Error("ページ%dで詳細ページのリンクの抽出に失敗しました: エラー: %v", pageNum, err)
 			return jobCount, fmt.Errorf("ページ%dで詳細リンクの抽出に失敗しました: %w", pageNum, err)
 		}
+		u.logger.Info("ページ%dで%d件の詳細ページのリンクを抽出しました", pageNum, len(links))
 
-		pageJobCount := 0
+		var pageJobCount int32
 		// 求人詳細リンクの処理
+		eg, childCtx := errgroup.WithContext(ctx)
 		for _, link := range links {
-			// 現在のURLを基準にしてリンクを解決
-			resolvedURL, err := u.resolveURL(currentURL.String(), link)
-			if err != nil {
-				u.logger.Warn("ページ%dでURL %sの解決に失敗しました: エラー: %v", pageNum, link, err)
-				continue
-			}
+			link := link // ループ変数のキャプチャ
 
-			u.logger.Info("求人詳細リンクが見つかりました: %s", resolvedURL)
+			eg.Go(func() error {
+				select {
+				case <-childCtx.Done():
+					u.logger.Warn("コンテキストがキャンセルされたため、ジョブ作成を中断します。")
+					return childCtx.Err()
+				default:
+					// 現在のURLを基準にしてリンクを解決
+					var resolvedURL string
+					var err error
 
-			if err := u.createCrawlJobByURL(ctx, resolvedURL); err != nil {
-				u.logger.Warn("ページ%dでURL %sのクロールジョブの作成に失敗しました: エラー: %v", pageNum, resolvedURL, err)
-				continue
-			}
-			pageJobCount++
+					switch u.cfg.JobDetailResolveBaseURL {
+					case "":
+						resolvedURL, err = u.resolveURL(currentURL.String(), link)
+					default:
+						resolvedURL, err = u.resolveURL(u.cfg.JobDetailResolveBaseURL, link)
+					}
+
+					if err != nil {
+						u.logger.Warn("ページ%dでURL %sの解決に失敗しました: エラー: %v", pageNum, link, err)
+						return nil // エラーを返さずに続行
+					}
+
+					u.logger.Info("求人詳細リンクが見つかりました: %s", resolvedURL)
+
+					if err := u.createCrawlJobByURL(ctx, resolvedURL); err != nil {
+						u.logger.Warn("ページ%dでURL %sのクロールジョブの作成に失敗しました: エラー: %v", pageNum, resolvedURL, err)
+						return nil // エラーを返さずに続行
+					}
+					atomic.AddInt32(&pageJobCount, 1)
+					return nil
+				}
+			})
 		}
 
-		jobCount += pageJobCount
+		if err := eg.Wait(); err != nil {
+			u.logger.Error("並列処理中にエラーが発生しました: %v", err)
+			return int(jobCount), fmt.Errorf("ページ%dでの詳細リンク処理中にエラーが発生しました: %w", pageNum, err)
+		}
+
+		jobCount += int(pageJobCount)
 		u.logger.Info("ページ%dで%d件のジョブを作成しました", pageNum, pageJobCount)
 
 		// 次のページボタンが存在するか確認
-		if !u.client.Exists(u.cfg.Selector.NextPageSelector) {
+		exists, err := u.client.Exists(u.cfg.Selector.NextPageLocator)
+		if err != nil {
+			u.logger.Error("ページ%dで次のページボタンの存在確認に失敗しました: エラー: %v", pageNum, err)
+			return int(jobCount), fmt.Errorf("ページ%dで次のページボタンの存在確認に失敗しました: %w", pageNum, err)
+		}
+		if !exists {
 			u.logger.Info("ページ%dに次のページボタンが見つかりませんでした。ページネーションを停止します。", pageNum)
 			break // 次のページがないためループを終了
 		}
 
 		// 次のページボタンをクリック
-		if err := u.client.Click(ctx, u.cfg.Selector.NextPageSelector); err != nil {
+		if err := u.client.Click(ctx, u.cfg.Selector.NextPageLocator); err != nil {
 			u.logger.Error("ページ%dで次のページボタンのクリックに失敗しました: エラー: %v", pageNum, err)
-			break // クリックに失敗したためループを終了
+			return int(jobCount), fmt.Errorf("ページ%dで次のページボタンのクリックに失敗しました: %w", pageNum, err)
 		}
 		pageNum++
 	}
@@ -233,14 +264,18 @@ func (u *PrefectureCrawlerUseCase) createJobsByNextLink(ctx context.Context) (in
 }
 
 // createJobsByTotalCountは、総件数からページ数を計算し、ページネーションURLを構築してクロールジョブを作成します。
-func (u *PrefectureCrawlerUseCase) createJobsByTotalCount(ctx context.Context) (int, error) {
+func (u *queueCrawlJobUseCase) createJobsByTotalCount(ctx context.Context) (int, error) {
 	texts, err := u.client.ExtractText(u.cfg.Selector.TotalCountSelector)
 	if err != nil {
 		return 0, fmt.Errorf("合計件数テキストの抽出に失敗しました: %w", err)
 	}
 
-	if len(texts) != 1 {
-		return 0, fmt.Errorf("合計件数テキストの抽出に失敗しました: %w", err)
+	if len(texts) == 0 {
+		return 0, fmt.Errorf("合計件数テキストが見つかりませんでした")
+	}
+
+	if len(texts) > 1 {
+		u.logger.Warn("合計件数セレクターに複数の要素がマッチしました。最初の要素を使用します。")
 	}
 
 	totalCount, err := u.extractTotalCount(texts[0])
@@ -251,6 +286,9 @@ func (u *PrefectureCrawlerUseCase) createJobsByTotalCount(ctx context.Context) (
 	u.logger.Info("総件数を抽出しました: %d (テキスト: %s)", totalCount, texts[0])
 
 	pageSize := u.cfg.Pagination.PerPage
+	if pageSize == 0 {
+		return 0, fmt.Errorf("ページサイズが0です。設定を確認してください。")
+	}
 	pageCount := (totalCount + pageSize - 1) / pageSize // 切り上げ計算
 
 	topListURL, err := u.client.GetCurrentURL(ctx)
@@ -284,7 +322,7 @@ func (u *PrefectureCrawlerUseCase) createJobsByTotalCount(ctx context.Context) (
 }
 
 // extractTotalCountは、テキストから合計件数を表す数値を正規表現で抽出し、カンマを除去して返します。
-func (u *PrefectureCrawlerUseCase) extractTotalCount(text string) (int, error) {
+func (u *queueCrawlJobUseCase) extractTotalCount(text string) (int, error) {
 	// 数字とカンマにマッチする正規表現。例: "1,234件" から "1,234" を抽出。
 	re := regexp.MustCompile(`[0-9,]+`)
 	match := re.FindString(text)
@@ -304,7 +342,7 @@ func (u *PrefectureCrawlerUseCase) extractTotalCount(text string) (int, error) {
 }
 
 // createCrawlJobByURLは、指定されたURLからCrawlJobを作成し、リポジトリに保存します。
-func (u *PrefectureCrawlerUseCase) createCrawlJobByURL(ctx context.Context, link string) error {
+func (u *queueCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, link string) error {
 	uParsed, err := url.Parse(link)
 	if err != nil {
 		return fmt.Errorf("URL %s のパースに失敗しました: %w", link, err)
@@ -316,7 +354,15 @@ func (u *PrefectureCrawlerUseCase) createCrawlJobByURL(ctx context.Context, link
 		URL:    *uParsed,
 	}
 
-	// Redisのキー生成ロジックにより、同じURLに対しては同じキーが生成されるため、
+	isExist, err := u.repo.Exists(ctx, job)
+	if err != nil {
+		return fmt.Errorf("クロールジョブの存在確認に失敗しました: %w", err)
+	}
+	if isExist {
+		u.logger.Info("既に存在するURLのためスキップします: %s", link)
+		return nil
+	}
+
 	if err := u.repo.Save(ctx, job); err != nil {
 		return fmt.Errorf("クロールジョブの保存に失敗しました: %w", err)
 	}
@@ -326,9 +372,10 @@ func (u *PrefectureCrawlerUseCase) createCrawlJobByURL(ctx context.Context, link
 
 // buildPaginatedURLは、ベースURLとページ番号に基づいてページネーションされたURLを構築します。
 // 設定されたページネーションタイプ（クエリパラメータ、パス、セグメント）に応じてURLを生成します。
-func (u *PrefectureCrawlerUseCase) buildPaginatedURL(baseURL string, page int) (string, error) {
+func (u *queueCrawlJobUseCase) buildPaginatedURL(baseURL string, page int) (string, error) {
 	uParsed, err := url.Parse(baseURL)
 	if err != nil {
+		u.logger.Error("URLのパースに失敗しました: %s, エラー: %v", baseURL, err)
 		return "", err
 	}
 
@@ -368,9 +415,10 @@ func (u *PrefectureCrawlerUseCase) buildPaginatedURL(baseURL string, page int) (
 
 // normalizeToPageOneURLは、現在のURLをページネーションの最初のページ（またはページネーションなし）のURLに正規化します。
 // クエリパラメータやパスセグメントのページ番号を除去します。
-func (u *PrefectureCrawlerUseCase) normalizeToPageOneURL(rawURL string) string {
+func (u *queueCrawlJobUseCase) normalizeToPageOneURL(rawURL string) string {
 	uParsed, err := url.Parse(rawURL)
 	if err != nil {
+		u.logger.Warn("URLのパースに失敗しました: %s, エラー: %v", rawURL, err)
 		return rawURL // パース失敗時はそのまま返す
 	}
 
@@ -422,85 +470,69 @@ func NewCrawlJobExecutorUseCase(args CrawlerArgs) CrawlerUseCase {
 	}
 }
 
+var (
+	ErrNoPendingJobs = errors.New("pending job not found")
+)
+
 // Runは、CrawlJobExecutorUseCaseのメイン実行ロジックです。
 // PENDING状態のCrawlJobを定期的に取得し、処理します。
 func (u *CrawlJobExecutorUseCase) Run(ctx context.Context) error {
 	u.logger.Info("クロールジョブ実行クローラーを開始します")
 
-	// PENDING状態のCrawlJobをループで取得し続ける
+	var totalProcessedCount int32 // 処理されたジョブの総数
+
+	// PENDING状態のCrawlJobをループで取得し、ワーカーに分配
 	for {
-		size := 100 // 一度に取得するジョブの数
-		jobs, err := u.repo.FindListByStatus(ctx, size, model.CrawlJobStatusPending)
+
+		jobs, err := u.repo.FindListByStatus(ctx, batchSize, model.CrawlJobStatusPending)
 		if err != nil {
 			u.logger.Error("保留中のクロールジョブの検索に失敗しました: %v", err)
-			return fmt.Errorf("保留中のクロールジョブの検索に失敗しました: %w", err)
+			break
 		}
 
 		if len(jobs) == 0 {
-			u.logger.Info("保留中のクロールジョブが見つかりませんでした。エグゼキューターを停止します。")
-			break // 処理すべきジョブがなければループを終了
+			u.logger.Info("保留中のクロールジョブが見つかりませんでした。すべてのワーカーが完了するのを待ちます。")
+			break
 		}
 
-		u.logger.Info("保留中のクロールジョブを%d件見つけました", len(jobs))
-
-		successCount := 0
-		// pending job　を処理
-		for i, job := range jobs {
-			u.logger.Info("クロールジョブを処理中: %d/%d, ID: %s, URL: %s", i+1, len(jobs), job.ID.String(), job.URL.String())
-
-			if err := u.processCrawlJob(ctx, job); err != nil {
-				u.logger.Error("クロールジョブの処理に失敗しました: ID: %s, URL: %s, エラー: %v", job.ID.String(), job.URL.String(), err)
-
-				newJob := model.CrawlJob{
-					ID:     job.ID,
-					URL:    job.URL,
-					Status: model.CrawlJobStatusFailed,
-				}
-
-				// ジョブのステータスをFAILEDに更新
-				if err := u.repo.Save(ctx, newJob); err != nil {
-					// ここで保存に失敗した場合、ログを出力して処理を続行するか、中断する
-					u.logger.Error("ジョブのステータスをFAILEDに保存できませんでした: ID: %s, エラー: %v", job.ID.String(), err)
-					break
-				}
-
-				continue
-			}
-
-			successCount++
+		for _, job := range jobs {
+			u.processCrawl(ctx, job)
 		}
-		u.logger.Info("クロールジョブエグゼキューターが完了しました: このバッチで成功したジョブ数=%d/%d", successCount, len(jobs))
-
 		// 短い間隔を置いて次のバッチをフェッチ
-		time.Sleep(1 * time.Second) // 必要に応じて調整
+		time.Sleep(3 * time.Second) // 必要に応じて調整
 	}
 
+	u.logger.Info("クロールジョブ実行クローラーが完了しました。合計処理ジョブ数: %d", totalProcessedCount)
 	return nil
 }
 
-// processCrawlJobは、単一のCrawlJobを処理します。
-// URLにナビゲートし、HTMLを取得して保存し、ジョブのステータスをSUCCESSに更新します。
-func (u *CrawlJobExecutorUseCase) processCrawlJob(ctx context.Context, job model.CrawlJob) error {
-	// URLに遷移
-	if err := u.client.Navigate(ctx, job.URL.String()); err != nil {
-		return fmt.Errorf("URL %s へのナビゲートに失敗しました: %w", job.URL.String(), err)
-	}
+func (u *CrawlJobExecutorUseCase) processCrawl(ctx context.Context, job model.CrawlJob) error {
+	u.logger.Info("クロールジョブを処理中 ID: %s, URL: %s", job.ID.String(), job.URL.String())
 
+	if u.cfg.Selector.TabClickSelector != "" {
+		u.logger.Info("タブをクリックします。セレクター: %s", u.cfg.Selector.TabClickSelector)
+		// タブをクリック
+		if err := u.client.Click(ctx, u.cfg.Selector.TabClickSelector); err != nil {
+			u.logger.Error("タブのクリックに失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		}
+	}
 	// HTMLを取得
 	html, err := u.client.GetHTML(ctx)
 	if err != nil {
-		return fmt.Errorf("HTMLの取得に失敗しました: %w", err)
+		u.logger.Error("HTMLの取得に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		return fmt.Errorf("")
 	}
 
 	// HTMLを保存
 	if err := u.client.SaveHTML(ctx, job.ID.String()+".html", html); err != nil {
-		return fmt.Errorf("HTMLの保存に失敗しました: %w", err)
+		u.logger.Error("HTMLの保存に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		return fmt.Errorf("")
 	}
 
-	// Note: ジョブの削除とステータス更新はアトミックに行われるべきです。
 	// 現在は、削除が成功してもステータス更新が失敗する可能性があるため、トランザクション管理を検討してください。
 	if err := u.repo.Delete(ctx, job); err != nil {
-		return fmt.Errorf("処理済みクロールジョブのRedisからの削除に失敗しました: %w", err)
+		u.logger.Error("処理済みクロールジョブの削除に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		return fmt.Errorf("")
 	}
 
 	newJob := model.CrawlJob{
@@ -511,10 +543,29 @@ func (u *CrawlJobExecutorUseCase) processCrawlJob(ctx context.Context, job model
 
 	// ジョブのステータスをSUCCESSに更新
 	if err := u.repo.Save(ctx, newJob); err != nil {
-		return fmt.Errorf("ジョブのステータスをSUCCESSに更新できませんでした: %w", err)
+		u.logger.Error("ジョブのステータスをSUCCESSに更新できませんでした ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		return fmt.Errorf("")
 	}
 
-	u.logger.Info("クロールジョブの処理に成功しました: ID: %s, URL: %s (HTMLサイズ: %dバイト)", job.ID.String(), job.URL.String(), len(html))
+	return nil
+}
 
+type RetryFailedCrawlJobUseCase struct {
+	cfg    *config.CrawlerConfig
+	client infra.BrowserClient
+	repo   repository.CrawlJobRepository
+	logger logger.AppLogger
+}
+
+func NewRetryFailedCrawlJobUseCase(args CrawlerArgs) CrawlerUseCase {
+	return &RetryFailedCrawlJobUseCase{
+		cfg:    args.Cfg,
+		client: args.Client,
+		repo:   args.Repo,
+		logger: args.Logger,
+	}
+}
+
+func (r *RetryFailedCrawlJobUseCase) Run(ctx context.Context) error {
 	return nil
 }

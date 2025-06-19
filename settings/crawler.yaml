@@ -1,16 +1,22 @@
 mode: manual
-# クロールを開始するベースURL
-base_url: "https://books.toscrape.com/"
-# 各リクエスト間の待機時間（秒）
-sleep_seconds: 10
+# クロールを開始する基準URL
+base_url: "https://type.jp/"
+# 求人詳細リンクが相対パスだった場合に使用する明示的な基準URL
+job_detail_resolve_base_url: ""
 # リクエストヘッダーに設定するUser-Agent
-user_agent: "Mozilla/5.0 (compatible; JobCrawler/1.0)"
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+# 各リクエスト間の待機時間（秒）
+crawl_sleep_seconds: 10
 # リクエストのタイムアウト時間（秒）
-timeout_seconds: 10
+crawl_timeout_seconds: 60
+# headless modeの有効/無効
+enable_headless: true
 # リクエストが失敗した際の再試行回数
 retry_count: 1
 # クロール結果を保存するディレクトリ
 output_dir: "./tmp/html"
+
+worker_num: 5
 
 # リクエストに追加するカスタムヘッダー
 headers:
@@ -23,15 +29,15 @@ strategy: "next_link"
 # クロール対象要素のCSSセレクター設定
 selector:
   # 都道府県（またはカテゴリ）リンクのCSSセレクター
-  prefecture_link_selector: "ul.nav > li > ul > li > a"
+  list_links_selector: "ul.nav > li > ul > li > a"
   # 次のページへのリンクのCSSセレクター（next_link戦略用）
-  next_page_selector: "li.next > a"
+  next_page_locator: "p.next.active > a"
   # 総件数を取得するためのCSSセレクター（total_count戦略用）
   total_count_selector: ""
   # 求人（または詳細情報）リンクのCSSセレクター
-  job_link_selector: "article.product_pod > h3 > a"
-  # 詳細求人リンクが相対パスの場合に、BaseURLに結合するプレフィックスパス（例: /jobs）
-  prefix_path: ""
+  detail_links_selector: "div.title > a"
+  # 詳細画面でclickした時にtabで遷移させるセレクター
+  tab_click_selector: ""
 
 # ページネーションに関する設定
 pagination:
@@ -44,7 +50,64 @@ pagination:
   # ページネーションの開始番号
   start: 1
   # 1ページあたりの項目数
-  per_page: 20
+  per_page: 50
 
 urls:
-  - https://books.toscrape.com/catalogue/category/books/mystery_3/index.html
+  - https://type.jp/job-1/1001/spid6422/?pathway=1
+
+# mode: manual
+# # クロールを開始するベースURL
+# base_url: "https://books.toscrape.com/"
+
+# job_detail_resolve_base_url: ""
+# # リクエストヘッダーに設定するUser-Agent
+# user_agent: "Mozilla/5.0 (compatible; JobCrawler/1.0)"
+# # 各リクエスト間の待機時間（秒）
+# crawl_sleep_seconds: 10
+# # リクエストのタイムアウト時間（秒）
+# crawl_timeout_seconds: 10
+# # redisのリクエストタイムアウト時間（秒）
+# redis_timeout_seconds: 60
+# # リクエストが失敗した際の再試行回数
+# retry_count: 1
+# # クロール結果を保存するディレクトリ
+# output_dir: "./tmp/html"
+
+# # リクエストに追加するカスタムヘッダー
+# headers:
+#   Accept-Language: "ja-JP"
+#   X-Custom-Header: "example"
+
+# # クロール戦略: "next_link"は「次へ」ボタンをたどる、"total_count"は総件数からページ数を計算
+# strategy: "next_link"
+
+# # クロール対象要素のCSSセレクター設定
+# selector:
+#   # 都道府県（またはカテゴリ）リンクのCSSセレクター
+#   prefecture_link_selector: "ul.nav > li > ul > li > a"
+#   # 次のページへのリンクのCSSセレクター（next_link戦略用）
+#   next_page_selector: "li.next > a"
+#   # 総件数を取得するためのCSSセレクター（total_count戦略用）
+#   total_count_selector: ""
+#   # 求人（または詳細情報）リンクのCSSセレクター
+#   job_link_selector: "article.product_pod > h3 > a"
+#   # 詳細画面でclickした時にtabで遷移させるセレクター
+#   tab_click_selector:
+#   # 詳細求人リンクが相対パスの場合に、BaseURLに結合するプレフィックスパス（例: /jobs）
+#   prefix_path: ""
+
+# # ページネーションに関する設定
+# pagination:
+#   # ページネーションのタイプ: "query", "path", "segment", "none"
+#   type: "none"
+#   # ページネーションを識別するための文字列（例: "page", "p", またはパスの "page"）
+#   param_identifier: ""
+#   # ページ番号の書式指定（例: "%d"、"%02d" など。パス/セグメントタイプで特に有効）
+#   page_format: ""
+#   # ページネーションの開始番号
+#   start: 1
+#   # 1ページあたりの項目数
+#   per_page: 20
+
+# urls:
+#   - https://books.toscrape.com/catalogue/category/books/mystery_3/index.html

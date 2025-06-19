@@ -5,7 +5,7 @@ dir_path: "/tmp/html"
 
 # 求人タイトル（例: "Webエンジニア募集"）
 title:
-  selector: ".job-title"
+  selector: "div.css-ikzlcq > h1"
 
 # 会社名（例: "株式会社テック"）
 company_name:

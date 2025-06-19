@@ -23,16 +23,16 @@ func NewCrawlJobClient(rds *redis.Client) repository.CrawlJobRepository {
 func (r *crawlJobClient) Save(ctx context.Context, job model.CrawlJob) error {
 	data, err := json.Marshal(job)
 	if err != nil {
-		return fmt.Errorf("failed to marshal crawl job: %w", err)
+		return fmt.Errorf("クローリングジョブのマーシャルに失敗しました: %w", err)
 	}
 
 	key, err := r.generateJobKey(job)
 	if err != nil {
-		return fmt.Errorf("failed to generate job key: %w", err)
+		return fmt.Errorf("ジョブキーの生成に失敗しました: %w", err)
 	}
 
 	if err := r.redis.Set(ctx, key, data, 0).Err(); err != nil {
-		return fmt.Errorf("failed to save crawl job to redis: %w", err)
+		return fmt.Errorf("クローリングジョブをRedisに保存できませんでした: %w", err)
 	}
 
 	return nil
@@ -41,10 +41,10 @@ func (r *crawlJobClient) Save(ctx context.Context, job model.CrawlJob) error {
 func (r *crawlJobClient) Delete(ctx context.Context, job model.CrawlJob) error {
 	key, err := r.generateJobKey(job)
 	if err != nil {
-		return fmt.Errorf("failed to generate job key for deletion: %w", err)
+		return fmt.Errorf("削除用のジョブキーの生成に失敗しました: %w", err)
 	}
 	if err := r.redis.Del(ctx, key).Err(); err != nil {
-		return fmt.Errorf("failed to delete pending job from redis: %w", err)
+		return fmt.Errorf("保留中のジョブをRedisから削除できませんでした: %w", err)
 	}
 	return nil
 }
@@ -66,7 +66,7 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 	case model.CrawlJobStatusPending:
 		pattern = "pending_job:*"
 	default:
-		return nil, fmt.Errorf("unsupported job status: %s", status)
+		return nil, fmt.Errorf("サポートされていないジョブステータスです: %s", status)
 	}
 
 	for {
@@ -74,19 +74,19 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 		var keys []string
 		keys, cursor, err = r.redis.Scan(ctx, cursor, pattern, batchSize).Result()
 		if err != nil {
-			return nil, fmt.Errorf("redis scan error: %w", err)
+			return nil, fmt.Errorf("redisスキャンエラー: %w", err)
 		}
 
 		// 取得したキーからジョブデータを取得
 		for _, key := range keys {
 			value, err := r.redis.Get(ctx, key).Result()
 			if err != nil {
-				return nil, fmt.Errorf("redis get error for key %s: %w", key, err)
+				return nil, fmt.Errorf("キー %s のRedis取得エラー: %w", key, err)
 			}
 
 			var job model.CrawlJob
 			if err := json.Unmarshal([]byte(value), &job); err != nil {
-				return nil, fmt.Errorf("unmarshal error for key %s: %w", key, err)
+				return nil, fmt.Errorf("キー %s のアンマーシャルエラー: %w", key, err)
 			}
 			jobs = append(jobs, job)
 		}
@@ -100,6 +100,18 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 	return jobs, nil
 }
 
+func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, error) {
+	key, err := r.generateJobKey(job)
+	if err != nil {
+		return false, fmt.Errorf("ジョブキーの生成に失敗しました: %w", err)
+	}
+	exists, err := r.redis.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("redisの存在確認に失敗しました: %w", err)
+	}
+	return exists > 0, nil
+}
+
 func (r *crawlJobClient) generateJobKey(job model.CrawlJob) (string, error) {
 	var key string
 	switch job.Status {
@@ -110,7 +122,7 @@ func (r *crawlJobClient) generateJobKey(job model.CrawlJob) (string, error) {
 	case model.CrawlJobStatusFailed:
 		key = r.generateFailedJobKey(job.URL.String())
 	default:
-		return "", fmt.Errorf("unsupported job status for key generation: %s", job.Status)
+		return "", fmt.Errorf("キー生成にサポートされていないジョブステータスです: %s", job.Status)
 	}
 
 	return key, nil

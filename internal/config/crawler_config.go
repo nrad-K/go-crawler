@@ -24,26 +24,29 @@ const (
 
 // CrawlerConfigはクローラーの動作設定をまとめる構造体です。
 type CrawlerConfig struct {
-	Mode           CrawlMode         `yaml:"mode" validate:"required,oneof=auto manual"`
-	Strategy       CrawlStrategy     `yaml:"strategy" validate:"required,oneof=next_link total_count url_list"` // クロール戦略（次へボタンをたどるか、総件数からページ数を計算するか）
-	BaseURL        string            `yaml:"base_url" validate:"url"`                                           // クロールを開始するベースURL
-	SleepSeconds   int               `yaml:"sleep_seconds" validate:"min=1,max=60"`                             // 各リクエスト間の待機時間（秒）
-	TimeoutSeconds int               `yaml:"timeout_seconds" validate:"min=1,max=300"`                          // リクエストのタイムアウト時間（秒）
-	UserAgent      string            `yaml:"user_agent" validate:"required,min=1"`                              // リクエストヘッダーに設定するUser-Agent
-	RetryCount     int               `yaml:"retry_count" validate:"min=0,max=5"`                                // リクエストが失敗した際の再試行回数
-	OutputDir      string            `yaml:"output_dir" validate:"required",dirpath"`                           // クロール結果を保存するディレクトリ
-	Headers        map[string]string `yaml:"headers"`                                                           // リクエストに追加するカスタムヘッダー
-	Selector       CrawlerSelector   `yaml:"selector" validate:"required"`                                      // クロール対象要素のCSSセレクター設定
-	Pagination     PaginationConfig  `yaml:"pagination" validate:"required"`                                    // ページネーションに関する設定
-	Urls           []string          `yaml:"urls"`                                                              // クロール対象のURLリスト（url_list戦略の場合必須）
+	Mode                    CrawlMode         `yaml:"mode" validate:"required,oneof=auto manual"`
+	Strategy                CrawlStrategy     `yaml:"strategy" validate:"required,oneof=next_link total_count url_list"` // クロール戦略（次へボタンをたどるか、総件数からページ数を計算するか）
+	BaseURL                 string            `yaml:"base_url" validate:"url"`                                           // クロールを開始するベースURL
+	JobDetailResolveBaseURL string            `yaml:"job_detail_resolve_base_url" validate:"omitempty,url"`              // 求人詳細リンクが相対パスだった場合に使用する明示的な基準URL
+	CrawlSleepSeconds       int               `yaml:"crawl_sleep_seconds" validate:"min=1,max=60"`                       // 各リクエスト間の待機時間（秒）
+	CrawlTimeoutSeconds     int               `yaml:"crawl_timeout_seconds" validate:"min=1,max=300"`                    // リクエストのタイムアウト時間（秒）
+	EnableHeadless          bool              `yaml:"enable_headless"`
+	UserAgent               string            `yaml:"user_agent" validate:"required,min=1"` // リクエストヘッダーに設定するUser-Agent
+	OutputDir               string            `yaml:"output_dir" validate:"required"`       // クロール結果を保存するディレクトリ
+	Headers                 map[string]string `yaml:"headers"`                              // リクエストに追加するカスタムヘッダー
+	Selector                CrawlerSelector   `yaml:"selector" validate:"required"`         // クロール対象要素のCSSセレクター設定
+	Pagination              PaginationConfig  `yaml:"pagination" validate:"required"`       // ページネーションに関する設定
+	Urls                    []string          `yaml:"urls"`                                 // クロール対象のURLリスト（url_list戦略の場合必須）
+	WorkerNum               int               `yaml:"worker_num" validate:"min=1,max=10"`   // 並列実行するワーカーの数
 }
 
 // CrawlerSelectorはWebページから特定の要素を選択するためのCSSセレクターを定義します。
 type CrawlerSelector struct {
-	PrefectureLinkSelector string `yaml:"prefecture_link_selector" validate:"required,min=1"` // 都道府県（またはカテゴリ）リンクのCSSセレクター(複数)
-	NextPageSelector       string `yaml:"next_page_selector"`                                 // 次のページへのリンクのCSSセレクター（CrawlByNextLink戦略用）(単一)
-	TotalCountSelector     string `yaml:"total_count_selector"`                               // 総件数を取得するためのCSSセレクター（CrawlByTotalCount戦略用）(単一)
-	JobLinkSelector        string `yaml:"job_link_selector" validate:"required,min=1"`        // 求人（または詳細情報）リンクのCSSセレクター(複数)
+	ListLinksSelector   string `yaml:"list_links_selector" validate:"required,min=1"`   // 一覧ページのリンクのCSSセレクター(複数)
+	NextPageLocator     string `yaml:"next_page_locator"`                               // 次のページへのリンクのロケータ-,CrawlByNextLink戦略用）(単一)
+	TotalCountSelector  string `yaml:"total_count_selector"`                            // 総件数を取得するためのCSSセレクター（CrawlByTotalCount戦略用）(単一)
+	TabClickSelector    string `yaml:"tab_click_selector"`                              // 詳細画面でclickした時にtabで遷移させるセレクター
+	DetailLinksSelector string `yaml:"detail_links_selector" validate:"required,min=1"` // 求人（または詳細情報）リンクのCSSセレクター(複数)
 }
 
 type PaginationType string
@@ -89,7 +92,7 @@ func LoadCrawlerConfig(path string) (CrawlerConfig, error) {
 	if cfg.Strategy == CrawlByTotalCount && cfg.Selector.TotalCountSelector == "" {
 		return CrawlerConfig{}, fmt.Errorf("total_count戦略にはtotal_count_selectorが必要です")
 	}
-	if cfg.Strategy == CrawlByNextLink && cfg.Selector.NextPageSelector == "" {
+	if cfg.Strategy == CrawlByNextLink && cfg.Selector.NextPageLocator == "" {
 		return CrawlerConfig{}, fmt.Errorf("next_link戦略にはnext_page_selectorが必要です")
 	}
 	if cfg.Mode == Manual && len(cfg.Urls) == 0 {
