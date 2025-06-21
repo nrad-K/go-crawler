@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/nrad-K/go-crawler/internal/domain/model"
-	"github.com/nrad-K/go-crawler/internal/domain/repository"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -24,7 +23,7 @@ type crawlJobClient struct {
 // return:
 //
 //	repository.CrawlJobRepository: 生成されたリポジトリ実装
-func NewCrawlJobClient(rds *redis.Client) repository.CrawlJobRepository {
+func NewCrawlJobClient(rds *redis.Client) *crawlJobClient {
 	return &crawlJobClient{
 		redis: rds,
 	}
@@ -41,7 +40,10 @@ func NewCrawlJobClient(rds *redis.Client) repository.CrawlJobRepository {
 //
 //	error: 保存に失敗した場合のエラー
 func (r *crawlJobClient) Save(ctx context.Context, job model.CrawlJob) error {
-	data, err := json.Marshal(job)
+	// ジョブをJSONにマーシャルする
+	record := ToRecord(job)
+
+	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("クローリングジョブのマーシャルに失敗しました: %w", err)
 	}
@@ -92,12 +94,12 @@ func (r *crawlJobClient) Delete(ctx context.Context, job model.CrawlJob) error {
 //	[]model.CrawlJob: 取得したジョブのリスト
 //	error: 取得に失敗した場合のエラー
 func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status model.CrawlJobStatus) ([]model.CrawlJob, error) {
-	var jobs []model.CrawlJob
-	var cursor uint64
-	var err error
 
 	// バッチサイズを設定
 	batchSize := int64(size)
+
+	jobs := make([]model.CrawlJob, 0, batchSize)
+	var cursor uint64
 
 	pattern := ""
 	switch status {
@@ -113,8 +115,7 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 
 	for {
 		// SCANコマンドでキーを取得
-		var keys []string
-		keys, cursor, err = r.redis.Scan(ctx, cursor, pattern, batchSize).Result()
+		keys, cursor, err := r.redis.Scan(ctx, cursor, pattern, batchSize).Result()
 		if err != nil {
 			return nil, fmt.Errorf("redisスキャンエラー: %w", err)
 		}
@@ -126,10 +127,19 @@ func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status 
 				return nil, fmt.Errorf("キー %s のRedis取得エラー: %w", key, err)
 			}
 
-			var job model.CrawlJob
-			if err := json.Unmarshal([]byte(value), &job); err != nil {
-				return nil, fmt.Errorf("キー %s のアンマーシャルエラー: %w", key, err)
+			// デシリアライズ処理
+			jobRecord := CrawlJobRecord{}
+			err = json.Unmarshal([]byte(value), &jobRecord)
+			if err != nil {
+				return nil, fmt.Errorf("キー %s のJSONデシリアライズに失敗しました: %w", key, err)
 			}
+
+			job, err := jobRecord.ToDomain()
+			if err != nil {
+				fmt.Printf("ジョブデータのドメイン変換に失敗しました（キー: %s, エラー: %v）\n", key, err)
+				continue
+			}
+
 			jobs = append(jobs, job)
 		}
 
@@ -177,13 +187,18 @@ func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, 
 //	error: 生成に失敗した場合のエラー
 func (r *crawlJobClient) generateJobKey(job model.CrawlJob) (string, error) {
 	var key string
-	switch job.Status {
+
+	switch job.Status() {
+
 	case model.CrawlJobStatusPending:
-		key = r.generatePendingJobKey(job.URL.String())
+		key = r.generatePendingJobKey(job.URL())
+
 	case model.CrawlJobStatusSuccess:
-		key = r.generateSuccessJobKey(job.URL.String())
+		key = r.generateSuccessJobKey(job.URL())
+
 	case model.CrawlJobStatusFailed:
-		key = r.generateFailedJobKey(job.URL.String())
+		key = r.generateFailedJobKey(job.URL())
+
 	default:
 		return "", fmt.Errorf("キー生成にサポートされていないジョブステータスです: %s", job.Status)
 	}

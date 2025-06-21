@@ -17,9 +17,7 @@ type SelectorConfig struct {
 
 // SalaryConfigは給与情報のセレクターと正規表現を定義します。
 type SalaryConfig struct {
-	Selector  string         `yaml:"selector" validate:"required,min=1"`
-	MinAmount SelectorConfig `yaml:"min_amount"`
-	MaxAmount SelectorConfig `yaml:"max_amount"`
+	Selector string `yaml:"selector" validate:"required,min=1"`
 }
 
 // DetailsConfigは求人詳細情報のセレクターを定義します。
@@ -39,12 +37,13 @@ type DetailsConfig struct {
 // ScraperConfigはスクレイパーの動作設定をまとめる構造体です。
 type ScraperConfig struct {
 	BaseURL      string         `yaml:"base_url" validate:"required,url"`
-	DirPath      string         `yaml:"dir_path" validate:"required,dirpath"`
+	HtmlDir      string         `yaml:"html_dir" validate:"required"`
+	OutputDir    string         `yaml:"output_dir" validate:"required"`
 	Title        SelectorConfig `yaml:"title" validate:"required"`
 	CompanyName  SelectorConfig `yaml:"company_name" validate:"required"`
 	SummaryURL   SelectorConfig `yaml:"summary_url" validate:"required"`
 	Location     SelectorConfig `yaml:"location" validate:"required"`
-	Headquarters SelectorConfig `yaml:"headquarters" validate:"require"`
+	Headquarters SelectorConfig `yaml:"headquarters" validate:"required"`
 	JobType      SelectorConfig `yaml:"job_type" validate:"required"`
 	Salary       SalaryConfig   `yaml:"salary" validate:"required"`
 	PostedAt     SelectorConfig `yaml:"posted_at" validate:"required"`

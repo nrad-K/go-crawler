@@ -7,5 +7,5 @@ import (
 )
 
 type JobPostingRepository interface {
-	Save(ctx context.Context, job model.JobPosting) error
+	Save(ctx context.Context, job chan model.JobPosting) error
 }

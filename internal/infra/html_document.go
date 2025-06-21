@@ -14,15 +14,10 @@ type HTMLDocument interface {
 }
 
 type htmlDocument struct {
-	doc *goquery.Document
 }
 
-func NewHTMLDocument(html string) (*htmlDocument, error) {
-	document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil, err
-	}
-	return &htmlDocument{doc: document}, nil
+func NewHTMLDocument() *htmlDocument {
+	return &htmlDocument{}
 }
 
 // ExtractText はHTMLから特定のセレクタにマッチする要素のテキストを抽出します。

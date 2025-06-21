@@ -1,81 +1,84 @@
 # 求人情報のスクレイピング設定
-base_url: "http://example.com"
+base_url: "https://type.jp"
 
-dir_path: "/tmp/html"
+html_dir: "tmp/html"
+output_dir: "tmp/csv"
 
 # 求人タイトル（例: "Webエンジニア募集"）
 title:
-  selector: "div.css-ikzlcq > h1"
+  selector: "h1.jobname"
 
 # 会社名（例: "株式会社テック"）
 company_name:
-  selector: ".company-name"
+  selector: ".corp-name a"
 
 # 勤務地
 location:
-  selector: ".job-location"
+  selector: "section.uq-detail-area-code p"
 
 # 本社所在地
 headquarters:
-  selector: ".company-headquarters"
+  selector: "p.uq-detail-address"
 
 # サマリーページへのURL（例: 詳細ページへのリンク）
 summary_url:
-  selector: ".job-summary a"
+  selector: "link[rel='canonical']"
   attr: "href"
 
 # 雇用形態（例: "正社員", "契約社員", etc.）
 job_type:
-  selector: ".job-type"
-  # Go側で "正社員" → model.FullTime などにマッピング
+  selector: ".uq-detail-type p"
 
 # 給与情報（給与文字列をまとめて取得）
 salary:
-  selector: ".salary"
-
+  selector: ".ico_salary"
 
 # 掲載日（例: "2025年6月10日"）
 posted_at:
-  selector: ".posted-date"
-  regex: "\\d{4}年\\d{1,2}月\\d{1,2}日"
+  selector: ".ico_end"
+  regex: "(\\d{4}\\.\\d{2}\\.\\d{2})"
 
 # 詳細情報
 details:
   # 職種名（例: "バックエンドエンジニア"）
   job_name:
-    selector: ".job-name"
+    selector: "h1.jobname"
 
   # 業務内容の説明
   description:
-    selector: ".job-description"
+    selector: ".uq-detail-jobdescription ._box_main"
 
   # 応募条件（例: "3年以上の実務経験"）
   requirements:
-    selector: ".job-requirements"
+    selector: ".uq-detail-required"
 
   # 勤務時間（例: "9:00〜18:00"）
   work_hours:
-    selector: ".job-hours"
+    selector: ".uq-detail-time h6"
 
   # 福利厚生（例: "社会保険完備、交通費支給"）
   benefits:
-    selector: ".job-benefits"
+    selector: ".uq-detail-treatment"
+
+  # 働き方
+  workplace_type:
+    selector: ".uq-detail-location > h6"
 
   # 昇給（例: "年1回" → Goで "1" として扱う）
   raise:
-    selector: ".job-raise"
-    regex: "(\\d+)回"
+    selector: ".uq-detail-treatment"
+    regex: "昇給年(\\d+)回"
 
   # 賞与（例: "年2回" → Goで "2" として扱う）
   bonus:
-    selector: ".job-bonus"
-    regex: "(\\d+)回"
+    selector: ".uq-detail-treatment"
+    regex: "賞与年(\\d+)回"
 
   # 年間休日（例: "年間120日" → Goで "120" として扱う）
   holidays_per_year:
-    selector: ".job-holidays"
-    regex: "(\\d+)日"
+    selector: ".uq-detail-holiday ._box_main > p"
+    regex: "年間休日(\\d+)日"
 
   # 休日休暇のポリシー（例: "完全週休2日制、祝日、年末年始"）
   holiday_policy:
-    selector: ".job-holiday-policy"
+    selector: ".uq-detail-holiday ._box_main"

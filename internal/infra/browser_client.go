@@ -65,17 +65,11 @@ func NewBrowserClient(cfg *config.CrawlerConfig) (*browserClient, error) {
 	}
 
 	if err := setupResourceBlocking(context); err != nil {
-		context.Close()
-		browser.Close()
-		pw.Stop()
 		return nil, fmt.Errorf("リソースブロックの設定に失敗しました: %w", err)
 	}
 
 	page, err := context.NewPage()
 	if err != nil {
-		context.Close()
-		browser.Close()
-		pw.Stop()
 		return nil, fmt.Errorf("ページの作成に失敗しました: %w", err)
 	}
 
@@ -206,6 +200,7 @@ func (b *browserClient) Close() error {
 	if err := b.browser.Close(); err != nil {
 		return fmt.Errorf("ブラウザを閉じれませんでした: %w", err)
 	}
+
 	if err := b.pw.Stop(); err != nil {
 		return fmt.Errorf("playwrightの停止に失敗しました: %w", err)
 	}

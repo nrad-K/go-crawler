@@ -3,162 +3,225 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"sync"
 
-	"github.com/google/uuid"
 	"github.com/nrad-K/go-crawler/internal/config"
 	"github.com/nrad-K/go-crawler/internal/domain/model"
-	"github.com/nrad-K/go-crawler/internal/domain/repository"
 	"github.com/nrad-K/go-crawler/internal/infra"
 	"github.com/nrad-K/go-crawler/internal/logger"
 )
 
-type ScraperUseCase interface {
-	Execute(ctx context.Context) error
-}
-
 type ScraperArgs struct {
-	loader   infra.HTMLFileLoader
-	document infra.HTMLDocument
-	repo     repository.JobPostingRepository
-	cfg      config.ScraperConfig
-	parser   infra.JobPostingParser
-	logger   logger.AppLogger
+	Loader   infra.HTMLFileLoader
+	Document infra.HTMLDocument
+	Exporter infra.FileExporter
+	Cfg      config.ScraperConfig
+	Parser   infra.JobPostingParser
+	Logger   logger.AppLogger
 }
 
 type saveJobPostingFromHTMLUseCase struct {
 	loader   infra.HTMLFileLoader
 	document infra.HTMLDocument
-	repo     repository.JobPostingRepository
+	exporter infra.FileExporter
 	cfg      config.ScraperConfig
 	parser   infra.JobPostingParser
 	logger   logger.AppLogger
 }
 
-func NewSaveJobPostingFromHTMLUseCase(args ScraperArgs) ScraperUseCase {
+func NewSaveJobPostingFromHTMLUseCase(args ScraperArgs) *saveJobPostingFromHTMLUseCase {
 	return &saveJobPostingFromHTMLUseCase{
-		loader:   args.loader,
-		document: args.document,
-		repo:     args.repo,
-		cfg:      args.cfg,
-		parser:   args.parser,
-		logger:   args.logger,
+		loader:   args.Loader,
+		document: args.Document,
+		exporter: args.Exporter,
+		cfg:      args.Cfg,
+		parser:   args.Parser,
+		logger:   args.Logger,
 	}
 }
 
-func (u *saveJobPostingFromHTMLUseCase) Execute(ctx context.Context) error {
+func (u *saveJobPostingFromHTMLUseCase) SaveJobPostingCSV(ctx context.Context) error {
 	u.logger.Info("HTMLファイルパスの一覧を取得します...")
-	dirpaths, err := u.loader.ListHTMLFilePaths(u.cfg.DirPath)
+	dirpaths, err := u.loader.ListHTMLFilePaths(u.cfg.HtmlDir)
 	if err != nil {
 		u.logger.Error("HTMLファイルの一覧取得に失敗しました: %v", err)
 		return fmt.Errorf("HTMLファイルの一覧取得に失敗しました: %w", err)
 	}
 
-	for _, path := range dirpaths {
-		u.logger.Info("HTMLファイルを処理中... Path: %s", path)
-		htmlContent, err := u.loader.LoadHTMLFile(path)
-		if err != nil {
-			u.logger.Error("HTMLファイルの読み込みに失敗しました. Path: %s, Error: %v", path, err)
-			return fmt.Errorf("HTMLファイルの読み込みに失敗しました: %w", err)
-		}
+	jobs := make(chan string, len(dirpaths))
+	jobPosting := make(chan model.JobPosting, len(dirpaths))
+	var wg sync.WaitGroup
+	maxWorkers := 3
 
-		var jobPosting model.JobPosting
-		jobPosting.ID = uuid.New()
-
-		if err := u.extractJobPosting(htmlContent, &jobPosting); err != nil {
-			u.logger.Error("求人情報の抽出に失敗しました. Path: %s, Error: %v", path, err)
-			return err
-		}
-
-		if err := u.repo.Save(ctx, jobPosting); err != nil {
-			u.logger.Error("求人情報のDB保存に失敗しました. ID: %s, Error: %v", jobPosting.ID, err)
-			return fmt.Errorf("求人情報のDB保存に失敗しました: %w", err)
-		}
-		u.logger.Info("求人情報を保存しました. ID: %s, CompanyName: %s", jobPosting.ID, jobPosting.CompanyName)
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			u.worker(ctx, jobs, jobPosting)
+		}()
 	}
 
-	u.logger.Info("スクレイピング処理が完了しました。")
+	for _, path := range dirpaths {
+		jobs <- path
+	}
+	close(jobs)
+
+	wg.Wait()
+	close(jobPosting)
+
+	writtenCount := 0
+	for post := range jobPosting {
+		if err := u.exporter.Write(post); err != nil {
+			u.logger.Error("求人情報の書き込みに失敗しました: %v", err)
+			continue
+		}
+		writtenCount++
+		if writtenCount%100 == 0 {
+			u.logger.Info("%d件の求人情報を書き込みました。", writtenCount)
+		}
+	}
+
+	if err := u.exporter.Close(); err != nil {
+		u.logger.Error("exporterのクローズに失敗しました: %v", err)
+		return fmt.Errorf("exporterのクローズに失敗しました: %w", err)
+	}
+
+	u.logger.Info("スクレイピング処理が完了しました。合計%d件の求人情報を書き込みました。", writtenCount)
 	return nil
 }
 
-func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jobPosting *model.JobPosting) error {
+func (u *saveJobPostingFromHTMLUseCase) worker(ctx context.Context, jobs <-chan string, results chan<- model.JobPosting) {
+	for path := range jobs {
+		select {
+
+		case <-ctx.Done():
+			return
+
+		default:
+			extractJobPosting, err := u.processFile(path)
+			if err != nil {
+				u.logger.Error("求人情報の処理に失敗しました. Path: %s, Error: %v", path, err)
+				continue
+			}
+
+			select {
+			case results <- extractJobPosting:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (u *saveJobPostingFromHTMLUseCase) processFile(path string) (model.JobPosting, error) {
+	htmlContent, err := u.loader.LoadHTMLFile(path)
+	if err != nil {
+		return model.JobPosting{}, fmt.Errorf("HTMLファイルの読み込みに失敗しました: %w", err)
+	}
+
+	extractJobPosting := u.extractJobPosting(htmlContent)
+	return extractJobPosting, nil
+}
+
+func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string) model.JobPosting {
+	var args model.JobPostingArgs
+	// タイトルを抽出
+	extractedTitles, err := u.extractValues(htmlContent, u.cfg.Title)
+	if err != nil {
+		u.logger.Warn("タイトルの抽出に失敗しました: %w", err)
+	}
+	if len(extractedTitles) > 0 {
+		args.Title = extractedTitles[0]
+	}
+
 	// Locationを抽出
 	extractedLocation, err := u.extractValues(htmlContent, u.cfg.Location)
 	if err != nil {
-		return fmt.Errorf("勤務地の抽出に失敗しました: %w", err)
+		u.logger.Warn("勤務地の抽出に失敗しました: %w", err)
 	}
 	if len(extractedLocation) > 0 {
-		jobPosting.Location = u.parser.ParseLocation(extractedLocation[0])
+		location, err := u.parser.ParseLocation(extractedLocation[0])
+		if err != nil {
+			u.logger.Warn("勤務地のパースに失敗しました: %w", err)
+		}
+
+		args.Location = location
 	}
 
-	// Headquarters
+	// Headquarters（本社所在地）の抽出
 	extractedHeadquarters, err := u.extractValues(htmlContent, u.cfg.Headquarters)
 	if err != nil {
-		return fmt.Errorf("本社所在地の抽出に失敗しました: %w", err)
+		u.logger.Warn("本社所在地の抽出に失敗しました: %w", err)
 	}
 	if len(extractedHeadquarters) > 0 {
-		jobPosting.Headquarters = u.parser.ParseLocation(extractedHeadquarters[0])
+		headquarters, err := u.parser.ParseLocation(extractedHeadquarters[0])
+		if err != nil {
+			u.logger.Warn("本社所在地のパースに失敗しました: %w", err)
+		}
+
+		args.Headquarters = headquarters
 	}
 
 	// 会社名を抽出
 	extractedCompanyNames, err := u.extractValues(htmlContent, u.cfg.CompanyName)
 	if err != nil {
-		return fmt.Errorf("会社名の抽出に失敗しました: %w", err)
+		u.logger.Warn("会社名の抽出に失敗しました: %w", err)
 	}
 	if len(extractedCompanyNames) > 0 {
-		jobPosting.CompanyName = extractedCompanyNames[0]
+		args.CompanyName = extractedCompanyNames[0]
 	}
 
 	// 概要URLを抽出
 	extractedSummaryURLs, err := u.extractValues(htmlContent, u.cfg.SummaryURL)
 	if err != nil {
-		return fmt.Errorf("概要URLの抽出に失敗しました: %w", err)
+		u.logger.Warn("概要URLの抽出に失敗しました: %w", err)
 	}
 	if len(extractedSummaryURLs) > 0 {
-		jobPosting.SummaryURL = extractedSummaryURLs[0]
+		args.SummaryURL = extractedSummaryURLs[0]
 	}
 
 	// JobTypeを抽出
 	extractedJobTypesStr, err := u.extractValues(htmlContent, u.cfg.JobType)
 	if err != nil {
-		return fmt.Errorf("JobTypeの抽出に失敗しました: %w", err)
+		u.logger.Warn("JobTypeの抽出に失敗しました: %w", err)
 	}
 	if len(extractedJobTypesStr) > 0 {
-		jobPosting.JobType = u.parser.ParseJobType(extractedJobTypesStr[0])
+		args.JobType = u.parser.ParseJobType(extractedJobTypesStr[0])
 	}
 
 	// Salaryを抽出
 	extractedSalaryStr, err := u.document.ExtractText(htmlContent, u.cfg.Salary.Selector)
 	if err != nil {
-		return fmt.Errorf("給与情報の抽出に失敗しました: %w", err)
+		u.logger.Warn("給与情報の抽出に失敗しました: %w", err)
 	}
 	if len(extractedSalaryStr) > 0 {
 		salary, err := u.parser.ParseSalaryDetails(extractedSalaryStr[0])
 		if err != nil {
-			return fmt.Errorf("給与情報のパースに失敗しました: %w", err)
+			u.logger.Warn("給与情報のパースに失敗しました: %w", err)
 		}
-		jobPosting.Salary = salary
+		args.Salary = salary
 	}
 
 	// PostedAtを抽出
 	extractedPostedAtStr, err := u.extractValues(htmlContent, u.cfg.PostedAt)
 	if err != nil {
-		return fmt.Errorf("PostedAtの抽出に失敗しました: %w", err)
+		u.logger.Warn("PostedAtの抽出に失敗しました: %w", err)
 	}
 	if len(extractedPostedAtStr) > 0 {
 		parsedTime, err := u.parser.ParsePostedAt(extractedPostedAtStr[0])
 		if err != nil {
-			return fmt.Errorf("PostedAtのパースに失敗しました: %w", err)
+			u.logger.Warn("PostedAtのパースに失敗しました: %w", err)
 		}
-		jobPosting.PostedAt = parsedTime
+		args.PostedAt = parsedTime
 	}
 
 	// Detailsを抽出
-	var details model.JobPostingDetail
+	var details model.JobPostingDetailArgs
 
 	// JobName
 	extractedJobName, err := u.extractValues(htmlContent, u.cfg.Details.JobName)
 	if err != nil {
-		return fmt.Errorf("職種名の抽出に失敗しました: %w", err)
+		u.logger.Warn("職種名の抽出に失敗しました: %w", err)
 	}
 	if len(extractedJobName) > 0 {
 		details.JobName = extractedJobName[0]
@@ -167,7 +230,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// Description
 	extractedDescription, err := u.extractValues(htmlContent, u.cfg.Details.Description)
 	if err != nil {
-		return fmt.Errorf("募集要項の抽出に失敗しました: %w", err)
+		u.logger.Warn("募集要項の抽出に失敗しました: %w", err)
 	}
 	if len(extractedDescription) > 0 {
 		details.Description = extractedDescription[0]
@@ -176,7 +239,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// Requirements
 	extractedRequirements, err := u.extractValues(htmlContent, u.cfg.Details.Requirements)
 	if err != nil {
-		return fmt.Errorf("応募資格・条件の抽出に失敗しました: %w", err)
+		u.logger.Warn("応募資格・条件の抽出に失敗しました: %w", err)
 	}
 	if len(extractedRequirements) > 0 {
 		details.Requirements = extractedRequirements[0]
@@ -185,7 +248,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// WorkHours
 	extractedWorkHours, err := u.extractValues(htmlContent, u.cfg.Details.WorkHours)
 	if err != nil {
-		return fmt.Errorf("勤務時間の抽出に失敗しました: %w", err)
+		u.logger.Warn("勤務時間の抽出に失敗しました: %w", err)
 	}
 	if len(extractedWorkHours) > 0 {
 		details.WorkHours = extractedWorkHours[0]
@@ -194,7 +257,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// WorkplaceType
 	extractedWorkplaceType, err := u.extractValues(htmlContent, u.cfg.Details.WorkplaceType)
 	if err != nil {
-		return fmt.Errorf("勤務地タイプ情報の抽出に失敗しました: %w", err)
+		u.logger.Warn("勤務地タイプ情報の抽出に失敗しました: %w", err)
 	}
 	if len(extractedWorkplaceType) > 0 {
 		details.WorkplaceType = u.parser.ParseWorkplaceType(extractedWorkplaceType[0])
@@ -203,7 +266,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// Benefits
 	extractedBenefits, err := u.extractValues(htmlContent, u.cfg.Details.Benefits)
 	if err != nil {
-		return fmt.Errorf("福利厚生の抽出に失敗しました: %w", err)
+		u.logger.Warn("福利厚生の抽出に失敗しました: %w", err)
 	}
 	if len(extractedBenefits) > 0 {
 		details.Benefits = u.parser.ParseBenefits(extractedBenefits[0])
@@ -212,7 +275,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// Raise
 	extractedRaise, err := u.extractValues(htmlContent, u.cfg.Details.Raise)
 	if err != nil {
-		return fmt.Errorf("昇給情報の抽出に失敗しました: %w", err)
+		u.logger.Warn("昇給情報の抽出に失敗しました: %w", err)
 	}
 	if len(extractedRaise) > 0 {
 		parsedRaise := u.parser.ParseRaise(extractedRaise[0])
@@ -222,7 +285,7 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// Bonus
 	extractedBonus, err := u.extractValues(htmlContent, u.cfg.Details.Bonus)
 	if err != nil {
-		return fmt.Errorf("賞与情報の抽出に失敗しました: %w", err)
+		u.logger.Warn("賞与情報の抽出に失敗しました: %w", err)
 	}
 	if len(extractedBonus) > 0 {
 		parsedBonus := u.parser.ParseBonus(extractedBonus[0])
@@ -232,12 +295,12 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// HolidaysPerYear
 	extractedHolidaysPerYear, err := u.extractValues(htmlContent, u.cfg.Details.HolidaysPerYear)
 	if err != nil {
-		return fmt.Errorf("年間休日数の抽出に失敗しました: %w", err)
+		u.logger.Warn("年間休日数の抽出に失敗しました: %w", err)
 	}
 	if len(extractedHolidaysPerYear) > 0 {
 		parsedHolidaysPerYear, err := u.parser.ParseOptionalUint(extractedHolidaysPerYear[0])
 		if err != nil {
-			return fmt.Errorf("年間休日数のパースに失敗しました: %w", err)
+			u.logger.Warn("年間休日数のパースに失敗しました: %w", err)
 		}
 		details.HolidaysPerYear = parsedHolidaysPerYear
 	}
@@ -245,14 +308,16 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string, jo
 	// HolidayPolicy
 	extractedHolidayPolicy, err := u.extractValues(htmlContent, u.cfg.Details.HolidayPolicy)
 	if err != nil {
-		return fmt.Errorf("休日休暇ポリシーの抽出に失敗しました: %w", err)
+		u.logger.Warn("休日休暇ポリシーの抽出に失敗しました: %w", err)
 	}
 	if len(extractedHolidayPolicy) > 0 {
 		details.HolidayPolicy = u.parser.ParseHolidayPolicy(extractedHolidayPolicy[0])
 	}
-	jobPosting.Details = details
+	extractDetails := model.NewJobPostingDetail(details)
+	args.Details = extractDetails
 
-	return nil
+	// JobPostingを生成して返す
+	return model.NewJobPosting(args)
 }
 
 // extractValues はSelectorConfigに基づいてHTMLから値を抽出します。

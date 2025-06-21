@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nrad-K/go-crawler/internal/config"
 	"github.com/nrad-K/go-crawler/internal/domain/model"
 	"github.com/nrad-K/go-crawler/internal/domain/repository"
@@ -123,8 +122,10 @@ func (u *generateCrawlJobUseCase) listLinksByMode() []string {
 	listLinks := make([]string, 0, 100)
 
 	switch u.cfg.Mode {
+
 	case config.Manual:
 		listLinks = u.cfg.Urls
+
 	case config.Auto:
 		if err := u.client.Navigate(u.cfg.BaseURL); err != nil {
 			u.logger.Error("べースURLへのナビゲーションに失敗しました: %s, エラー: %v", u.cfg.BaseURL, err)
@@ -265,17 +266,21 @@ func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int
 
 			eg.Go(func() error {
 				select {
+
 				case <-childCtx.Done():
 					u.logger.Warn("コンテキストがキャンセルされたため、ジョブ作成を中断します。")
 					return childCtx.Err()
+
 				default:
 					// 現在のURLを基準にしてリンクを解決
 					var resolvedURL string
 					var err error
 
 					switch u.cfg.JobDetailResolveBaseURL {
+
 					case "":
 						resolvedURL, err = u.resolveURL(currentURL.String(), targetLink)
+
 					default:
 						resolvedURL, err = u.resolveURL(u.cfg.JobDetailResolveBaseURL, targetLink)
 					}
@@ -434,16 +439,10 @@ func (u *generateCrawlJobUseCase) extractTotalCount(text string) (int, error) {
 // return:
 //
 //	error : 保存や存在確認で発生したエラー
-func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, link string) error {
-	uParsed, err := url.Parse(link)
+func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, rawURL string) error {
+	job, err := model.NewCrawlJob(rawURL)
 	if err != nil {
-		return fmt.Errorf("URL %s のパースに失敗しました: %w", link, err)
-	}
-
-	job := model.CrawlJob{
-		ID:     uuid.New(),
-		Status: model.CrawlJobStatusPending,
-		URL:    *uParsed,
+		return fmt.Errorf("クロールジョブの作成に失敗しました: %w", err)
 	}
 
 	isExist, err := u.repo.Exists(ctx, job)
@@ -452,7 +451,7 @@ func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, link 
 	}
 
 	if isExist {
-		u.logger.Info("既に存在するURLのためスキップします: %s", link)
+		u.logger.Info("既に存在するURLのためスキップします: %s", rawURL)
 		return nil
 	}
 
@@ -624,6 +623,10 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 		for _, job := range jobs {
 			u.processCrawl(ctx, job)
 			totalProcessedJob++
+
+			if totalProcessedJob%10 == 0 {
+				u.logger.Info("ジョブを処理しました。現在の合計処理数: %d, ジョブID: %s, URL: %s", totalProcessedJob, job.ID(), job.URL())
+			}
 		}
 		// 短い間隔を置いて次のバッチをフェッチ
 		time.Sleep(5 * time.Second) // 必要に応じて調整
@@ -644,10 +647,10 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 //
 //	error : 実行中に発生したエラー
 func (u *executeCrawlJobUseCase) processCrawl(ctx context.Context, job model.CrawlJob) error {
-	u.logger.Info("クロールジョブを処理中 ID: %s, URL: %s", job.ID.String(), job.URL.String())
+	u.logger.Info("クロールジョブを処理中 ID: %s, URL: %s", job.ID(), job.URL())
 
-	if err := u.client.Navigate(job.URL.String()); err != nil {
-		u.logger.Error("ナビゲーションに失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+	if err := u.client.Navigate(job.URL()); err != nil {
+		u.logger.Error("ナビゲーションに失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		return fmt.Errorf("ナビゲーションに失敗しました: %w", err)
 	}
 
@@ -655,37 +658,36 @@ func (u *executeCrawlJobUseCase) processCrawl(ctx context.Context, job model.Cra
 		u.logger.Info("タブをクリックします。セレクター: %s", u.cfg.Selector.TabClickSelector)
 		// タブをクリック
 		if err := u.client.Click(u.cfg.Selector.TabClickSelector); err != nil {
-			u.logger.Error("タブのクリックに失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+			u.logger.Error("タブのクリックに失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		}
 	}
 	// HTMLを取得
 	html, err := u.client.GetHTML()
 	if err != nil {
-		u.logger.Error("HTMLの取得に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		u.logger.Error("HTMLの取得に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		return fmt.Errorf("HTMLの取得に失敗しました: %w", err)
 	}
 
 	// HTMLを保存
-	if err := u.client.SaveHTML(job.ID.String()+".html", html); err != nil {
-		u.logger.Error("HTMLの保存に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+	if err := u.client.SaveHTML(job.ID()+".html", html); err != nil {
+		u.logger.Error("HTMLの保存に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		return fmt.Errorf("HTMLの保存に失敗しました: %w", err)
 	}
 
 	// 現在は、削除が成功してもステータス更新が失敗する可能性があるため、トランザクション管理を検討してください。
 	if err := u.repo.Delete(ctx, job); err != nil {
-		u.logger.Error("処理済みクロールジョブの削除に失敗しました ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		u.logger.Error("処理済みクロールジョブの削除に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		return fmt.Errorf("クロールジョブの削除に失敗しました: %w", err)
 	}
 
-	newJob := model.CrawlJob{
-		ID:     job.ID,
-		URL:    job.URL,
-		Status: model.CrawlJobStatusSuccess,
+	newJob, err := job.ChangeStatus(model.CrawlJobStatusSuccess)
+	if err != nil {
+		return fmt.Errorf("ジョブのステータス変更に失敗しました: %w", err)
 	}
 
 	// ジョブのステータスをSUCCESSに更新
 	if err := u.repo.Save(ctx, newJob); err != nil {
-		u.logger.Error("ジョブのステータスをSUCCESSに更新できませんでした ID: %s, URL: %s, エラー: %w", job.ID.String(), job.URL.String(), err)
+		u.logger.Error("ジョブのステータスをSUCCESSに更新できませんでした ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
 		return fmt.Errorf("ジョブのステータス更新に失敗しました: %w", err)
 	}
 
