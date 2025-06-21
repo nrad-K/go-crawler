@@ -67,12 +67,10 @@ details:
   # 昇給（例: "年1回" → Goで "1" として扱う）
   raise:
     selector: ".uq-detail-treatment"
-    regex: "昇給年(\\d+)回"
 
   # 賞与（例: "年2回" → Goで "2" として扱う）
   bonus:
     selector: ".uq-detail-treatment"
-    regex: "賞与年(\\d+)回"
 
   # 年間休日（例: "年間120日" → Goで "120" として扱う）
   holidays_per_year:

@@ -190,17 +190,21 @@ func (u *saveJobPostingFromHTMLUseCase) extractJobPosting(htmlContent string) mo
 	}
 
 	// Salaryを抽出
-	extractedSalaryStr, err := u.document.ExtractText(htmlContent, u.cfg.Salary.Selector)
+	var salaryStr string
+	extractedSalaryStrs, err := u.document.ExtractText(htmlContent, u.cfg.Salary.Selector)
 	if err != nil {
 		u.logger.Warn("給与情報の抽出に失敗しました: %w", err)
 	}
-	if len(extractedSalaryStr) > 0 {
-		salary, err := u.parser.ParseSalaryDetails(extractedSalaryStr[0])
-		if err != nil {
-			u.logger.Warn("給与情報のパースに失敗しました: %w", err)
-		}
-		args.Salary = salary
+	if len(extractedSalaryStrs) > 0 {
+		salaryStr = extractedSalaryStrs[0]
 	}
+
+	salary, err := u.parser.ParseSalaryDetails(salaryStr)
+	// 空文字列のパースエラーはログに出さない
+	if err != nil && salaryStr != "" {
+		u.logger.Warn("給与情報のパースに失敗しました: %w", err)
+	}
+	args.Salary = salary
 
 	// PostedAtを抽出
 	extractedPostedAtStr, err := u.extractValues(htmlContent, u.cfg.PostedAt)

@@ -7,14 +7,6 @@ type Salary struct {
 }
 
 func NewSalary(minAmount uint64, maxAmount *uint64, salaryType SalaryType) Salary {
-	if maxAmount == nil {
-		return Salary{
-			minAmount: minAmount,
-			maxAmount: new(uint64),
-			unit:      salaryType,
-		}
-	}
-
 	return Salary{
 		minAmount: minAmount,
 		maxAmount: maxAmount,

@@ -24,12 +24,6 @@ type JobPostingParser interface {
 	ParseLocation(location string) (model.Location, error)
 }
 
-const (
-	// 給与推定の閾値
-	YearlySalaryThreshold  = 100 // 100万円以上は年収と推定
-	MonthlySalaryThreshold = 20  // 20万円以上は月給と推定
-)
-
 type CompiledPatterns struct {
 	RaisePatterns       []*regexp.Regexp
 	BonusPatterns       []*regexp.Regexp
@@ -137,15 +131,6 @@ func (p *jobPostingParser) ParseAmount(amountStr string) (uint64, error) {
 
 func (p *jobPostingParser) ParseRaise(text string) *uint {
 	text = p.normalizeString(text)
-	// 昇給に関するパターンを定義
-	// raisePatterns := []*regexp.Regexp{
-	// 	regexp.MustCompile(`昇給[／/]年(\d+)回`),   // 昇給／年1回
-	// 	regexp.MustCompile(`昇給.*年(\d+)回`),     // 昇給...年1回
-	// 	regexp.MustCompile(`年(\d+)回.*昇給`),     // 年1回...昇給
-	// 	regexp.MustCompile(`昇給.*(\d+)回[／/]年`), // 昇給...1回／年
-	// 	regexp.MustCompile(`昇給.*(\d+)回.*年`),   // 昇給...1回...年
-	// }
-
 	for _, pattern := range p.patterns.RaisePatterns {
 		matches := pattern.FindStringSubmatch(text)
 		if len(matches) <= 1 {
@@ -169,16 +154,6 @@ func (p *jobPostingParser) ParseRaise(text string) *uint {
 
 func (p *jobPostingParser) ParseBonus(text string) *uint {
 	text = p.normalizeString(text)
-	// 賞与に関するパターンを定義
-	// bonusPatterns := []*regexp.Regexp{
-	// 	regexp.MustCompile(`賞与[／/]年(\d+)回`),   // 賞与／年2回
-	// 	regexp.MustCompile(`賞与.*年(\d+)回`),     // 賞与...年2回
-	// 	regexp.MustCompile(`年(\d+)回.*賞与`),     // 年2回...賞与
-	// 	regexp.MustCompile(`賞与.*(\d+)回[／/]年`), // 賞与...2回／年
-	// 	regexp.MustCompile(`賞与.*(\d+)回.*年`),   // 賞与...2回...年
-	// 	regexp.MustCompile(`ボーナス[／/]年(\d+)回`), // ボーナス／年2回
-	// 	regexp.MustCompile(`ボーナス.*年(\d+)回`),   // ボーナス...年2回
-	// }
 
 	for _, pattern := range p.patterns.BonusPatterns {
 		matches := pattern.FindStringSubmatch(text)
@@ -205,21 +180,34 @@ func (p *jobPostingParser) ParseBonus(text string) *uint {
 func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, error) {
 	salaryStr = p.normalizeString(salaryStr)
 	if salaryStr == "" {
-		return model.Salary{}, fmt.Errorf("給与文字列が空です")
+		return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与文字列が空です")
 	}
 
 	unit := p.ParseSalaryType(salaryStr)
 
 	// 範囲表現の処理
 	if matches := p.patterns.SalaryRangePattern.FindStringSubmatch(salaryStr); len(matches) >= 3 {
-		minAmount, err := p.ParseAmount(matches[1])
-		if err != nil {
-			return model.Salary{}, fmt.Errorf("給与の下限値のパースに失敗しました: %w", err)
+		minStr := matches[1]
+		maxStr := matches[2]
+
+		// 下限に単位がなく上限にある場合、上限の単位を下限に付与する
+		// 例: 400〜500万円 -> 400万円〜500万円
+		unitRegex := regexp.MustCompile(`(万|千|億)`)
+		minUnitMatch := unitRegex.FindString(minStr)
+		maxUnitMatch := unitRegex.FindString(maxStr)
+
+		if minUnitMatch == "" && maxUnitMatch != "" {
+			minStr += maxUnitMatch
 		}
 
-		maxAmount, err := p.ParseAmount(matches[2])
+		minAmount, err := p.ParseAmount(minStr)
 		if err != nil {
-			return model.Salary{}, fmt.Errorf("給与の上限値のパースに失敗しました: %w", err)
+			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の下限値のパースに失敗しました: %w", err)
+		}
+
+		maxAmount, err := p.ParseAmount(maxStr)
+		if err != nil {
+			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の上限値のパースに失敗しました: %w", err)
 		}
 
 		return model.NewSalary(minAmount, &maxAmount, unit), nil
@@ -230,59 +218,29 @@ func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, e
 	if singleMatch := p.patterns.SalarySinglePattern.FindStringSubmatch(salaryStr); len(singleMatch) >= 2 {
 		amount, err := p.ParseAmount(singleMatch[1])
 		if err != nil {
-			return model.Salary{}, fmt.Errorf("給与のパースに失敗しました: %w", err)
+			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与のパースに失敗しました: %w", err)
 		}
 
-		return model.NewSalary(amount, new(uint64), unit), nil
+		return model.NewSalary(amount, nil, unit), nil
 	}
 
-	return model.Salary{}, fmt.Errorf("給与の金額を抽出できませんでした: %s", salaryStr)
+	return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の金額を抽出できませんでした: %s", salaryStr)
 }
 
 // ParseSalaryUnitAndCurrency は給与情報からUnitとIsFixedを抽出します。
 func (p *jobPostingParser) ParseSalaryType(salaryStr string) model.SalaryType {
-	var unit model.SalaryType = model.UnknownSalaryType
-
 	switch {
-
 	case strings.Contains(salaryStr, "年収"), strings.Contains(salaryStr, "年給"):
-		unit = model.Yearly
-
+		return model.Yearly
 	case strings.Contains(salaryStr, "月給"):
-		unit = model.Monthly
-
+		return model.Monthly
 	case strings.Contains(salaryStr, "日給"):
-		unit = model.Daily
-
+		return model.Daily
 	case strings.Contains(salaryStr, "時給"):
-		unit = model.Hourly
-
+		return model.Hourly
 	default:
-		unit = p.InferSalaryUnitFromAmount(salaryStr)
+		return model.UnknownSalaryType
 	}
-
-	return unit
-}
-
-func (p *jobPostingParser) InferSalaryUnitFromAmount(salaryStr string) model.SalaryType {
-	matches := regexp.MustCompile(`(\d+)\s*万`).FindAllStringSubmatch(salaryStr, -1)
-
-	for _, m := range matches {
-		amount, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-
-		switch {
-
-		case amount >= YearlySalaryThreshold:
-			return model.Yearly
-
-		case amount >= MonthlySalaryThreshold:
-			return model.Monthly
-		}
-	}
-	return model.UnknownSalaryType
 }
 
 // ParseOptionalUint はオプションの数値を抽出し、*uint型で返します。
@@ -290,19 +248,19 @@ func (p *jobPostingParser) InferSalaryUnitFromAmount(salaryStr string) model.Sal
 func (p *jobPostingParser) ParseOptionalUint(optionalStr string) (*uint, error) {
 	optionalStr = p.normalizeString(optionalStr)
 	if optionalStr == "" {
-		return new(uint), nil // 値がない場合はnilを返す
+		return nil, nil // 値がない場合はnilを返す
 	}
 
 	re := regexp.MustCompile(`[^0-9]`)
 	cleanStr := re.ReplaceAllString(optionalStr, "")
 
 	if cleanStr == "" {
-		return new(uint), nil // クリーンアップ後に空になった場合もnilを返す
+		return nil, nil // クリーンアップ後に空になった場合もnilを返す
 	}
 
 	parsedVal, err := strconv.ParseUint(cleanStr, 10, 64)
 	if err != nil {
-		return new(uint), fmt.Errorf("オプションの数値のパースに失敗しました: %w", err)
+		return nil, fmt.Errorf("オプションの数値のパースに失敗しました: %w", err)
 	}
 
 	// uint64からuintへ変換。Goのuintはシステム依存のサイズだが、ここでは十分なサイズを想定。
@@ -409,6 +367,18 @@ func (p *jobPostingParser) ParseBenefits(benefitsStr string) model.Benefits {
 }
 
 var (
+	// 全角記号を半角に変換するためのリプレーサー
+	symbolReplacer = strings.NewReplacer(
+		"～", "~",
+		"／", "/",
+		"（", "(",
+		"）", ")",
+		"！", "!",
+		"？", "?",
+		"：", ":",
+		"　", " ", // 全角スペース
+	)
+
 	// 都道府県名と PrefectureCode の対応表
 	prefMap = map[string]model.PrefectureCode{
 		"北海道":  model.Hokkaido,
@@ -502,6 +472,9 @@ func (p *jobPostingParser) ParseLocation(locationStr string) (model.Location, er
 
 // 文字列の正規化を行うヘルパー関数
 func (p *jobPostingParser) normalizeString(s string) string {
+	// 全角記号を半角に変換
+	s = symbolReplacer.Replace(s)
+
 	// 全角スペースも含めてトリム
 	s = strings.TrimFunc(s, func(r rune) bool {
 		return unicode.IsSpace(r)
