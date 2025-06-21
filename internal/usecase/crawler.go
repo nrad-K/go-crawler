@@ -77,7 +77,7 @@ const (
 //
 //	error : 実行中に発生したエラー
 func (u *generateCrawlJobUseCase) GenerateCrawlJob(ctx context.Context) error {
-	u.logger.Info("クローラーの実行を開始します: ベースURL=%s, Strategy=%s", u.cfg.BaseURL, u.cfg.Strategy)
+	u.logger.Info("クローラーの実行を開始します", "baseURL", u.cfg.BaseURL, "strategy", u.cfg.Strategy)
 
 	// ベースURLに遷移
 	listLinks := u.listLinksByMode()
@@ -88,28 +88,28 @@ func (u *generateCrawlJobUseCase) GenerateCrawlJob(ctx context.Context) error {
 	}
 
 	// 一覧ページのリンクを抽出
-	u.logger.Info("一覧ページのリンクを%d件見つけました", len(listLinks))
+	u.logger.Info("一覧ページのリンクを見つけました", "count", len(listLinks))
 
 	// 一覧リンクの処理
 	for i, link := range listLinks {
 		// BaseURLを基準にしてリンクを解決
 		resolvedLink, err := u.resolveURL(u.cfg.BaseURL, link)
 		if err != nil {
-			u.logger.Error("ぺージネーションページのリンクの解決に失敗しました: %s, エラー: %v", link, err)
+			u.logger.Error("ぺージネーションページのリンクの解決に失敗しました", "link", link, "error", err)
 			continue
 		}
 
-		u.logger.Info("一覧ページのリンクを処理中: %d/%d, リンク: %s", i+1, len(listLinks), resolvedLink)
+		u.logger.Info("一覧ページのリンクを処理中", "current", i+1, "total", len(listLinks), "link", resolvedLink)
 
 		if err := u.processListLink(ctx, resolvedLink); err != nil {
-			u.logger.Error("一覧ページのリンクの処理に失敗しました: %d, リンク: %s, エラー: %v", i+1, resolvedLink, err)
+			u.logger.Error("一覧ページのリンクの処理に失敗しました", "index", i+1, "link", resolvedLink, "error", err)
 			continue
 		}
 
 		time.Sleep(time.Duration(u.cfg.CrawlSleepSeconds) * time.Second)
 	}
 
-	u.logger.Info("クローラーの実行が完了しました: 件数=%d", len(listLinks))
+	u.logger.Info("クローラーの実行が完了しました", "count", len(listLinks))
 	return nil
 }
 
@@ -128,13 +128,13 @@ func (u *generateCrawlJobUseCase) listLinksByMode() []string {
 
 	case config.Auto:
 		if err := u.client.Navigate(u.cfg.BaseURL); err != nil {
-			u.logger.Error("べースURLへのナビゲーションに失敗しました: %s, エラー: %v", u.cfg.BaseURL, err)
+			u.logger.Error("べースURLへのナビゲーションに失敗しました", "url", u.cfg.BaseURL, "error", err)
 			return listLinks
 		}
 
 		links, err := u.client.ExtractAttribute(u.cfg.Selector.ListLinksSelector, "href")
 		if err != nil {
-			u.logger.Error("一覧ページのリンクの抽出に失敗しました: セレクター=%s, エラー: %v", u.cfg.Selector.ListLinksSelector, err)
+			u.logger.Error("一覧ページのリンクの抽出に失敗しました", "selector", u.cfg.Selector.ListLinksSelector, "error", err)
 			return listLinks
 		}
 
@@ -144,7 +144,7 @@ func (u *generateCrawlJobUseCase) listLinksByMode() []string {
 		return listLinks
 	}
 
-	u.logger.Info("listLinksByMode: %d件のリンクを取得: %v", len(listLinks), listLinks)
+	u.logger.Info("listLinksByMode: リンクを取得", "count", len(listLinks))
 	return listLinks
 }
 
@@ -198,7 +198,7 @@ func (u *generateCrawlJobUseCase) processListLink(ctx context.Context, link stri
 		return fmt.Errorf("%s のクロールジョブ作成に失敗しました: %w", link, err)
 	}
 
-	u.logger.Info("クロールジョブを%d件作成しました", jobCount)
+	u.logger.Info("クロールジョブを作成しました", "count", jobCount)
 
 	return nil
 }
@@ -242,21 +242,21 @@ func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int
 	pageNum := 1
 
 	for {
-		u.logger.Info("ページ%dを処理中", pageNum)
+		u.logger.Info("ページを処理中", "page", pageNum)
 
 		currentURL, err := u.client.CurrentURL()
 		if err != nil {
-			u.logger.Error("ページ%dで現在のURLの取得に失敗しました: エラー: %v", pageNum, err)
+			u.logger.Error("現在のURLの取得に失敗しました", "page", pageNum, "error", err)
 			return jobCount, fmt.Errorf("ページ%dで現在のURLの取得に失敗しました: %w", pageNum, err)
 		}
 
 		links, err := u.client.ExtractAttribute(u.cfg.Selector.DetailLinksSelector, "href")
 		if err != nil {
-			u.logger.Error("ページ%dで詳細ページのリンクの抽出に失敗しました: エラー: %v", pageNum, err)
+			u.logger.Error("詳細ページのリンクの抽出に失敗しました", "page", pageNum, "error", err)
 			return jobCount, fmt.Errorf("ページ%dで詳細リンクの抽出に失敗しました: %w", pageNum, err)
 		}
 
-		u.logger.Info("ページ%dで%d件の詳細ページのリンクを抽出しました", pageNum, len(links))
+		u.logger.Info("詳細ページのリンクを抽出しました", "page", pageNum, "count", len(links))
 
 		var pageJobCount int32
 		// 求人詳細リンクの処理
@@ -286,14 +286,14 @@ func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int
 					}
 
 					if err != nil {
-						u.logger.Warn("ページ%dでURL %sの解決に失敗しました: エラー: %v", pageNum, targetLink, err)
+						u.logger.Warn("URLの解決に失敗しました", "page", pageNum, "url", targetLink, "error", err)
 						return nil // エラーを返さずに続行
 					}
 
-					u.logger.Info("求人詳細リンクが見つかりました: %s", resolvedURL)
+					u.logger.Info("求人詳細リンクが見つかりました", "url", resolvedURL)
 
 					if err := u.createCrawlJobByURL(ctx, resolvedURL); err != nil {
-						u.logger.Warn("ページ%dでURL %sのクロールジョブの作成に失敗しました: エラー: %v", pageNum, resolvedURL, err)
+						u.logger.Warn("クロールジョブの作成に失敗しました", "page", pageNum, "url", resolvedURL, "error", err)
 						return nil // エラーを返さずに続行
 					}
 
@@ -304,28 +304,28 @@ func (u *generateCrawlJobUseCase) createJobsByNextLink(ctx context.Context) (int
 		}
 
 		if err := eg.Wait(); err != nil {
-			u.logger.Error("並列処理中にエラーが発生しました: %v", err)
+			u.logger.Error("並列処理中にエラーが発生しました", "error", err)
 			return int(jobCount), fmt.Errorf("ページ%dでの詳細リンク処理中にエラーが発生しました: %w", pageNum, err)
 		}
 
 		jobCount += int(pageJobCount)
-		u.logger.Info("ページ%dで%d件のジョブを作成しました", pageNum, pageJobCount)
+		u.logger.Info("ジョブを作成しました", "page", pageNum, "count", pageJobCount)
 
 		// 次のページボタンが存在するか確認
 		exists, err := u.client.Exists(u.cfg.Selector.NextPageLocator)
 		if err != nil {
-			u.logger.Error("ページ%dで次のページボタンの存在確認に失敗しました: エラー: %v", pageNum, err)
+			u.logger.Error("次のページボタンの存在確認に失敗しました", "page", pageNum, "error", err)
 			return int(jobCount), fmt.Errorf("ページ%dで次のページボタンの存在確認に失敗しました: %w", pageNum, err)
 		}
 
 		if !exists {
-			u.logger.Info("ページ%dに次のページボタンが見つかりませんでした。ページネーションを停止します。", pageNum)
+			u.logger.Info("次のページボタンが見つかりませんでした。ページネーションを停止します。", "page", pageNum)
 			return int(jobCount), nil
 		}
 
 		// 次のページボタンをクリック
 		if err := u.client.Click(u.cfg.Selector.NextPageLocator); err != nil {
-			u.logger.Error("ページ%dで次のページボタンのクリックに失敗しました: エラー: %v", pageNum, err)
+			u.logger.Error("次のページボタンのクリックに失敗しました", "page", pageNum, "error", err)
 			return int(jobCount), fmt.Errorf("ページ%dで次のページボタンのクリックに失敗しました: %w", pageNum, err)
 		}
 
@@ -362,7 +362,7 @@ func (u *generateCrawlJobUseCase) createJobsByTotalCount(ctx context.Context) (i
 		return 0, fmt.Errorf("合計件数の抽出に失敗しました: %w", err)
 	}
 
-	u.logger.Info("総件数を抽出しました: %d (テキスト: %s)", totalCount, texts[0])
+	u.logger.Info("総件数を抽出しました", "count", totalCount, "text", texts[0])
 
 	pageSize := u.cfg.Pagination.PerPage
 	if pageSize == 0 {
@@ -381,18 +381,18 @@ func (u *generateCrawlJobUseCase) createJobsByTotalCount(ctx context.Context) (i
 	for page := u.cfg.Pagination.Start; page <= pageCount; page++ {
 		pageURL, err := u.buildPaginatedURL(baseURL, page)
 		if err != nil {
-			u.logger.Error("ページ%dのページネーションURL構築に失敗しました: ベース=%s, エラー: %v", page, baseURL, err)
+			u.logger.Error("ページネーションURL構築に失敗しました", "page", page, "baseURL", baseURL, "error", err)
 			continue
 		}
 
 		resolvedURL, err := u.resolveURL(u.cfg.BaseURL, pageURL)
 		if err != nil {
-			u.logger.Warn("ページネーションURL %s の解決に失敗しました: エラー: %v", pageURL, err)
+			u.logger.Warn("ページネーションURLの解決に失敗しました", "url", pageURL, "error", err)
 			continue
 		}
 
 		if err := u.createCrawlJobByURL(ctx, resolvedURL); err != nil {
-			u.logger.Warn("ページ%dのURL %s のクロールジョブ作成に失敗しました: エラー: %v", page, resolvedURL, err)
+			u.logger.Warn("クロールジョブ作成に失敗しました", "page", page, "url", resolvedURL, "error", err)
 			continue
 		}
 		jobCount++
@@ -451,7 +451,7 @@ func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, rawUR
 	}
 
 	if isExist {
-		u.logger.Info("既に存在するURLのためスキップします: %s", rawURL)
+		u.logger.Info("既に存在するURLのためスキップします", "url", rawURL)
 		return nil
 	}
 
@@ -476,7 +476,7 @@ func (u *generateCrawlJobUseCase) createCrawlJobByURL(ctx context.Context, rawUR
 func (u *generateCrawlJobUseCase) buildPaginatedURL(baseURL string, page int) (string, error) {
 	uParsed, err := url.Parse(baseURL)
 	if err != nil {
-		u.logger.Error("URLのパースに失敗しました: %s, エラー: %v", baseURL, err)
+		u.logger.Error("URLのパースに失敗しました", "url", baseURL, "error", err)
 		return "", err
 	}
 
@@ -528,7 +528,7 @@ func (u *generateCrawlJobUseCase) normalizeToPageOneURL(rawURL string) string {
 	uParsed, err := url.Parse(rawURL)
 
 	if err != nil {
-		u.logger.Warn("URLのパースに失敗しました: %s, エラー: %v", rawURL, err)
+		u.logger.Warn("URLのパースに失敗しました", "url", rawURL, "error", err)
 		return rawURL // パース失敗時はそのまま返す
 	}
 
@@ -611,7 +611,7 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 	for {
 		jobs, err := u.repo.FindListByStatus(ctx, batchSize, model.CrawlJobStatusPending)
 		if err != nil {
-			u.logger.Error("保留中のクロールジョブの検索に失敗しました: %v", err)
+			u.logger.Error("保留中のクロールジョブの検索に失敗しました", "error", err)
 			break
 		}
 
@@ -625,14 +625,14 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 			totalProcessedJob++
 
 			if totalProcessedJob%10 == 0 {
-				u.logger.Info("ジョブを処理しました。現在の合計処理数: %d, ジョブID: %s, URL: %s", totalProcessedJob, job.ID(), job.URL())
+				u.logger.Info("ジョブを処理しました", "total_processed", totalProcessedJob, "jobID", job.ID(), "url", job.URL())
 			}
 		}
 		// 短い間隔を置いて次のバッチをフェッチ
 		time.Sleep(5 * time.Second) // 必要に応じて調整
 	}
 
-	u.logger.Info("クローラーが完了しました。合計処理ジョブ数: %d件", totalProcessedJob)
+	u.logger.Info("クローラーが完了しました", "total_processed", totalProcessedJob)
 	return nil
 }
 
@@ -647,36 +647,36 @@ func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 //
 //	error : 実行中に発生したエラー
 func (u *executeCrawlJobUseCase) processCrawl(ctx context.Context, job model.CrawlJob) error {
-	u.logger.Info("クロールジョブを処理中 ID: %s, URL: %s", job.ID(), job.URL())
+	u.logger.Info("クロールジョブを処理中", "id", job.ID(), "url", job.URL())
 
 	if err := u.client.Navigate(job.URL()); err != nil {
-		u.logger.Error("ナビゲーションに失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+		u.logger.Error("ナビゲーションに失敗しました", "id", job.ID(), "url", job.URL(), "error", err)
 		return fmt.Errorf("ナビゲーションに失敗しました: %w", err)
 	}
 
 	if u.cfg.Selector.TabClickSelector != "" {
-		u.logger.Info("タブをクリックします。セレクター: %s", u.cfg.Selector.TabClickSelector)
+		u.logger.Info("タブをクリックします", "selector", u.cfg.Selector.TabClickSelector)
 		// タブをクリック
 		if err := u.client.Click(u.cfg.Selector.TabClickSelector); err != nil {
-			u.logger.Error("タブのクリックに失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+			u.logger.Error("タブのクリックに失敗しました", "id", job.ID(), "url", job.URL(), "error", err)
 		}
 	}
 	// HTMLを取得
 	html, err := u.client.GetHTML()
 	if err != nil {
-		u.logger.Error("HTMLの取得に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+		u.logger.Error("HTMLの取得に失敗しました", "id", job.ID(), "url", job.URL(), "error", err)
 		return fmt.Errorf("HTMLの取得に失敗しました: %w", err)
 	}
 
 	// HTMLを保存
 	if err := u.client.SaveHTML(job.ID()+".html", html); err != nil {
-		u.logger.Error("HTMLの保存に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+		u.logger.Error("HTMLの保存に失敗しました", "id", job.ID(), "url", job.URL(), "error", err)
 		return fmt.Errorf("HTMLの保存に失敗しました: %w", err)
 	}
 
 	// 現在は、削除が成功してもステータス更新が失敗する可能性があるため、トランザクション管理を検討してください。
 	if err := u.repo.Delete(ctx, job); err != nil {
-		u.logger.Error("処理済みクロールジョブの削除に失敗しました ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+		u.logger.Error("処理済みクロールジョブの削除に失敗しました", "id", job.ID(), "url", job.URL(), "error", err)
 		return fmt.Errorf("クロールジョブの削除に失敗しました: %w", err)
 	}
 
@@ -687,7 +687,7 @@ func (u *executeCrawlJobUseCase) processCrawl(ctx context.Context, job model.Cra
 
 	// ジョブのステータスをSUCCESSに更新
 	if err := u.repo.Save(ctx, newJob); err != nil {
-		u.logger.Error("ジョブのステータスをSUCCESSに更新できませんでした ID: %s, URL: %s, エラー: %w", job.ID(), job.URL(), err)
+		u.logger.Error("ジョブのステータスをSUCCESSに更新できませんでした", "id", job.ID(), "url", job.URL(), "error", err)
 		return fmt.Errorf("ジョブのステータス更新に失敗しました: %w", err)
 	}
 

@@ -9,16 +9,26 @@ import (
 	"github.com/nrad-K/go-crawler/internal/domain/model"
 )
 
+// FileExporterは、求人情報をファイルにエクスポートするためのインターフェースです。
 type FileExporter interface {
+	// Writeは、単一の求人情報を書き込みます。
 	Write(jobPosting model.JobPosting) error
+	// Closeは、エクスポーターをクローズし、リソースを解放します。
 	Close() error
 }
 
+// CSVExporterは、求人情報をCSVファイルにエクスポートするFileExporterの実装です。
+//
+// フィールド:
+//
+//	file   : 書き込み対象の*os.File
+//	writer : CSV書き込みを行う*csv.Writer
 type CSVExporter struct {
 	file   *os.File
 	writer *csv.Writer
 }
 
+// formatUintは、*uint型の値をフォーマットします。ポインタがnilの場合は空文字列を返します。
 func formatUint(p *uint) string {
 	if p == nil {
 		return ""
@@ -26,6 +36,7 @@ func formatUint(p *uint) string {
 	return fmt.Sprintf("%d", *p)
 }
 
+// formatUint64は、*uint64型の値をフォーマットします。ポインタがnilの場合は空文字列を返します。
 func formatUint64(p *uint64) string {
 	if p == nil {
 		return ""
@@ -33,6 +44,18 @@ func formatUint64(p *uint64) string {
 	return fmt.Sprintf("%d", *p)
 }
 
+// NewCSVExporterは、CSVExporterの新しいインスタンスを生成します。
+// 指定されたファイルパスにCSVファイルを作成し、ヘッダーを書き込みます。
+//
+// args:
+//
+//	filePath : 出力するCSVファイルのパス
+//	headers  : CSVファイルのヘッダー行
+//
+// return:
+//
+//	*CSVExporter : 生成されたCSVExporterのインスタンス
+//	error        : ディレクトリやファイルの作成、ヘッダーの書き込みに失敗した場合のエラー
 func NewCSVExporter(filePath string, headers []string) (*CSVExporter, error) {
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -56,6 +79,15 @@ func NewCSVExporter(filePath string, headers []string) (*CSVExporter, error) {
 	}, nil
 }
 
+// Writeは、1件の求人情報をCSVファイルに書き込みます。
+//
+// args:
+//
+//	job : 書き込む対象のmodel.JobPosting
+//
+// return:
+//
+//	error : CSV行の書き込みに失敗した場合のエラー
 func (c *CSVExporter) Write(job model.JobPosting) error {
 
 	row := []string{
@@ -90,6 +122,11 @@ func (c *CSVExporter) Write(job model.JobPosting) error {
 	return c.writer.Write(row)
 }
 
+// Closeは、CSVライターをフラッシュし、ファイルをクローズします。
+//
+// return:
+//
+//	error : ファイルのクローズに失敗した場合のエラー
 func (c *CSVExporter) Close() error {
 	c.writer.Flush()
 	return c.file.Close()

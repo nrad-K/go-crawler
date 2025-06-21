@@ -11,6 +11,7 @@ import (
 	"github.com/nrad-K/go-crawler/internal/domain/model"
 )
 
+// JobPostingParserは、求人情報の様々な要素を文字列から解析するためのインターフェースです。
 type JobPostingParser interface {
 	ParseJobType(jobTypeStr string) model.JobType
 	ParsePostedAt(postedAtStr string) (time.Time, error)
@@ -24,6 +25,8 @@ type JobPostingParser interface {
 	ParseLocation(location string) (model.Location, error)
 }
 
+// CompiledPatternsは、解析処理で使用されるコンパイル済みの正規表現を保持します。
+// これにより、パースのたびに正規表現をコンパイルするオーバーヘッドを削減します。
 type CompiledPatterns struct {
 	RaisePatterns       []*regexp.Regexp
 	BonusPatterns       []*regexp.Regexp
@@ -33,17 +36,39 @@ type CompiledPatterns struct {
 	LocationPattern     *regexp.Regexp
 }
 
+// jobPostingParserは、JobPostingParserインターフェースの実装です。
+//
+// フィールド:
+//
+//	patterns: コンパイル済みの正規表現パターン
 type jobPostingParser struct {
 	patterns CompiledPatterns
 }
 
+// NewJobPostingParserは、jobPostingParserの新しいインスタンスを生成します。
+//
+// args:
+//
+//	patterns: 解析に使用するコンパイル済み正規表現
+//
+// return:
+//
+//	*jobPostingParser: 新しいパーサーのインスタンス
 func NewJobPostingParser(patterns CompiledPatterns) *jobPostingParser {
 	return &jobPostingParser{
 		patterns: patterns,
 	}
 }
 
-// ParseJobType は文字列からmodel.JobTypeに変換します。
+// ParseJobTypeは、与えられた雇用形態の文字列を解析し、対応するmodel.JobType定数を返します。
+//
+// args:
+//
+//	jobTypeStr: 解析対象の雇用形態の文字列 (例: "正社員", "アルバイト")
+//
+// return:
+//
+//	model.JobType: 解析結果の雇用形態
 func (p *jobPostingParser) ParseJobType(jobTypeStr string) model.JobType {
 	jobTypeStr = p.normalizeString(jobTypeStr)
 	if strings.Contains(jobTypeStr, "正社員") {
@@ -67,7 +92,16 @@ func (p *jobPostingParser) ParseJobType(jobTypeStr string) model.JobType {
 	return model.Unknown
 }
 
-// ParsePostedAt は文字列からtime.Timeに変換します。
+// ParsePostedAtは、様々な形式の投稿日の文字列を解析し、time.Timeオブジェクトに変換します。
+//
+// args:
+//
+//	postedAtStr: 解析対象の日付文字列 (例: "2023年03月15日", "2023/03/15")
+//
+// return:
+//
+//	time.Time: 解析された時刻
+//	error    : いずれの形式にもマッチしない場合のエラー
 func (p *jobPostingParser) ParsePostedAt(postedAtStr string) (time.Time, error) {
 	postedAtStr = p.normalizeString(postedAtStr)
 	formats := []string{
@@ -88,7 +122,16 @@ func (p *jobPostingParser) ParsePostedAt(postedAtStr string) (time.Time, error) 
 	return time.Time{}, fmt.Errorf("日付のパースに失敗しました: %s", postedAtStr)
 }
 
-// ParseAmount は金額文字列からuint64に変換します。
+// ParseAmountは、"100万円"や"500,000"のような金額を表す文字列から、数値を抽出しuint64型で返します。
+//
+// args:
+//
+//	amountStr: 解析対象の金額文字列
+//
+// return:
+//
+//	uint64: 解析された金額
+//	error : 解析に失敗した場合のエラー
 func (p *jobPostingParser) ParseAmount(amountStr string) (uint64, error) {
 	amountStr = p.normalizeString(amountStr)
 	if amountStr == "" {
@@ -129,6 +172,15 @@ func (p *jobPostingParser) ParseAmount(amountStr string) (uint64, error) {
 	return amount, nil
 }
 
+// ParseRaiseは、昇給情報を含むテキストから年間の昇給回数を抽出します。
+//
+// args:
+//
+//	text: 昇給情報を含む文字列
+//
+// return:
+//
+//	*uint: 抽出された昇給回数。見つからない場合はnil。
 func (p *jobPostingParser) ParseRaise(text string) *uint {
 	text = p.normalizeString(text)
 	for _, pattern := range p.patterns.RaisePatterns {
@@ -152,6 +204,15 @@ func (p *jobPostingParser) ParseRaise(text string) *uint {
 	return nil
 }
 
+// ParseBonusは、賞与情報を含むテキストから年間の賞与回数を抽出します。
+//
+// args:
+//
+//	text: 賞与情報を含む文字列
+//
+// return:
+//
+//	*uint: 抽出された賞与回数。見つからない場合はnil。
 func (p *jobPostingParser) ParseBonus(text string) *uint {
 	text = p.normalizeString(text)
 
@@ -176,7 +237,16 @@ func (p *jobPostingParser) ParseBonus(text string) *uint {
 	return nil
 }
 
-// ParseSalaryDetails は給与情報を解析し、範囲や単位、固定・変動を返す
+// ParseSalaryDetailsは、給与情報の文字列を解析し、給与の範囲、単位などを含むmodel.Salaryオブジェクトを返します。
+//
+// args:
+//
+//	salaryStr: 解析対象の給与情報文字列 (例: "月給25万円～", "年収400万円～800万円")
+//
+// return:
+//
+//	model.Salary: 解析された給与情報
+//	error       : 解析に失敗した場合のエラー
 func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, error) {
 	salaryStr = p.normalizeString(salaryStr)
 	if salaryStr == "" {
@@ -227,7 +297,15 @@ func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, e
 	return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の金額を抽出できませんでした: %s", salaryStr)
 }
 
-// ParseSalaryUnitAndCurrency は給与情報からUnitとIsFixedを抽出します。
+// ParseSalaryTypeは、給与情報の文字列から給与の単位（年収、月給など）を特定します。
+//
+// args:
+//
+//	salaryStr: 解析対象の給与情報文字列
+//
+// return:
+//
+//	model.SalaryType: 特定された給与単位
 func (p *jobPostingParser) ParseSalaryType(salaryStr string) model.SalaryType {
 	switch {
 	case strings.Contains(salaryStr, "年収"), strings.Contains(salaryStr, "年給"):
@@ -243,8 +321,17 @@ func (p *jobPostingParser) ParseSalaryType(salaryStr string) model.SalaryType {
 	}
 }
 
-// ParseOptionalUint はオプションの数値を抽出し、*uint型で返します。
-// 文字列が空の場合やパースできない場合はnilを返します。
+// ParseOptionalUintは、オプションの数値を含む文字列（例: 年間休日数）を解析し、*uint型で返します。
+// 文字列が空の場合や数値に変換できない場合はnilを返します。
+//
+// args:
+//
+//	optionalStr: 解析対象の文字列
+//
+// return:
+//
+//	*uint: 解析された数値。解析できない場合はnil。
+//	error: 数値への変換に失敗した場合のエラー
 func (p *jobPostingParser) ParseOptionalUint(optionalStr string) (*uint, error) {
 	optionalStr = p.normalizeString(optionalStr)
 	if optionalStr == "" {
@@ -268,7 +355,15 @@ func (p *jobPostingParser) ParseOptionalUint(optionalStr string) (*uint, error) 
 	return &val, nil
 }
 
-// ParseHolidayPolicy は文字列からmodel.HolidayPolicyに変換します。
+// ParseHolidayPolicyは、休日・休暇に関する文字列を解析し、対応するmodel.HolidayPolicyを返します。
+//
+// args:
+//
+//	policyStr: 解析対象の休日・休暇の文字列
+//
+// return:
+//
+//	model.HolidayPolicy: 解析された休日ポリシー
 func (p *jobPostingParser) ParseHolidayPolicy(policyStr string) model.HolidayPolicy {
 	policyStr = p.normalizeString(policyStr)
 	if strings.Contains(policyStr, "完全週休二日制") {
@@ -287,7 +382,15 @@ func (p *jobPostingParser) ParseHolidayPolicy(policyStr string) model.HolidayPol
 	return model.UnknownHoliday
 }
 
-// ParseWorkplaceType は文字列からmodel.WorkplaceTypeに変換します。
+// ParseWorkplaceTypeは、勤務形態に関する文字列を解析し、対応するmodel.WorkplaceTypeを返します。
+//
+// args:
+//
+//	workplaceTypeStr: 解析対象の勤務形態の文字列
+//
+// return:
+//
+//	model.WorkplaceType: 解析された勤務形態
 func (p *jobPostingParser) ParseWorkplaceType(workplaceTypeStr string) model.WorkplaceType {
 	workplaceTypeStr = p.normalizeString(workplaceTypeStr)
 	if strings.Contains(workplaceTypeStr, "出社") {
@@ -302,7 +405,15 @@ func (p *jobPostingParser) ParseWorkplaceType(workplaceTypeStr string) model.Wor
 	return model.UnknownWorkplace
 }
 
-// ParseBenefits は福利厚生の文字列をパースしてmodel.Benefits構造体に変換します。
+// ParseBenefitsは、福利厚生に関する文字列を解析し、キーワードに基づいてmodel.Benefits構造体に変換します。
+//
+// args:
+//
+//	benefitsStr: 解析対象の福利厚生の文字列
+//
+// return:
+//
+//	model.Benefits: 解析された福利厚生情報
 func (p *jobPostingParser) ParseBenefits(benefitsStr string) model.Benefits {
 	var benefits model.BenefitsArgs
 	benefits.RawBenefits = benefitsStr // 元の文字列を保存
@@ -431,6 +542,16 @@ var (
 	}
 )
 
+// ParseLocationは、所在地の文字列を解析し、都道府県コード、市区町村などを含むmodel.Locationオブジェクトを返します。
+//
+// args:
+//
+//	locationStr: 解析対象の所在地の文字列
+//
+// return:
+//
+//	model.Location: 解析された所在地情報
+//	error         : 都道府県名の特定に失敗した場合などのエラー
 func (p *jobPostingParser) ParseLocation(locationStr string) (model.Location, error) {
 	locationStr = p.normalizeString(locationStr)
 	if locationStr == "" {
@@ -470,7 +591,15 @@ func (p *jobPostingParser) ParseLocation(locationStr string) (model.Location, er
 	return model.NewLocation(code, name, city, locationStr), nil
 }
 
-// 文字列の正規化を行うヘルパー関数
+// normalizeStringは、文字列の正規化（全角記号・数字の半角化、トリムなど）を行います。
+//
+// args:
+//
+//	s: 正規化対象の文字列
+//
+// return:
+//
+//	string: 正規化後の文字列
 func (p *jobPostingParser) normalizeString(s string) string {
 	// 全角記号を半角に変換
 	s = symbolReplacer.Replace(s)

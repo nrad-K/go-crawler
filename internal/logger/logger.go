@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"fmt"
 	"log/slog"
 )
 
@@ -21,14 +20,14 @@ func NewAppLogger(logger *slog.Logger) AppLogger {
 	}
 }
 
-func (l *appLogger) Info(format string, args ...any) {
-	l.logger.Info(fmt.Sprintf(format, args...))
+func (l *appLogger) Info(msg string, args ...any) {
+	l.logger.Info(msg, args...)
 }
 
-func (l *appLogger) Warn(format string, args ...any) {
-	l.logger.Warn(fmt.Sprintf(format, args...))
+func (l *appLogger) Warn(msg string, args ...any) {
+	l.logger.Warn(msg, args...)
 }
 
-func (l *appLogger) Error(format string, args ...any) {
-	l.logger.Error(fmt.Sprintf(format, args...))
+func (l *appLogger) Error(msg string, args ...any) {
+	l.logger.Error(msg, args...)
 }
