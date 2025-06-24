@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3"
 services:
   redis:
     image: redis:latest
@@ -7,18 +7,5 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-  crawler:
-    build: .
-    container_name: go-crawler
-    ports:
-      - "8080:8080"
-    depends_on:
-      - redis
-    volumes:
-      - crawl_data:/app/tmp
-    env_file:
-      - .env
-
 volumes:
   redis_data:
-  # crawl_data:

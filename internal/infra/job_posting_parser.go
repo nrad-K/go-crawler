@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/nrad-K/go-crawler/internal/domain/model"
+	"golang.org/x/text/width"
 )
 
 // JobPostingParserは、求人情報の様々な要素を文字列から解析するためのインターフェースです。
@@ -596,10 +597,9 @@ func (p *jobPostingParser) ParseLocation(locationStr string) (model.Location, er
 
 	var city string
 	// 市区町村の抽出（例: 東京都渋谷区 → 渋谷区）
-	// re := regexp.MustCompile(`(?:都|道|府|県)(.+?[市区町村])`)
 	match := p.patterns.LocationPattern.FindStringSubmatch(locationStr)
 	if len(match) >= 2 {
-		city = match[1]
+		city = p.trimPunctuation(match[1])
 	}
 
 	return model.NewLocation(code, name, city, locationStr), nil
@@ -615,6 +615,9 @@ func (p *jobPostingParser) ParseLocation(locationStr string) (model.Location, er
 //
 //	string: 正規化後の文字列
 func (p *jobPostingParser) normalizeString(s string) string {
+	// 全角英数字・記号・カタカナなどを半角に変換
+	s = width.Narrow.String(s)
+
 	// 全角記号を半角に変換
 	s = symbolReplacer.Replace(s)
 
@@ -635,4 +638,19 @@ func (p *jobPostingParser) normalizeString(s string) string {
 	}, s)
 
 	return s
+}
+
+// trimPunctuationは、文字列の先頭と末尾から句読点や記号を削除します。
+//
+// args:
+//
+//	s: 処理対象の文字列
+//
+// return:
+//
+//	string: 句読点と記号がトリムされた文字列
+func (p *jobPostingParser) trimPunctuation(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		return unicode.IsPunct(r) || unicode.IsSymbol(r)
+	})
 }

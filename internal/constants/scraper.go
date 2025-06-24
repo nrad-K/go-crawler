@@ -28,7 +28,7 @@ func GetScraperCompiledPatterns() infra.CompiledPatterns {
 		AmountPattern:       regexp.MustCompile(`(\d+(?:\.\d+)?)`),
 		SalaryRangePattern:  regexp.MustCompile(`([\d.,]+(?:万|千|億)?円?)\s*[~～]\s*([\d.,]+(?:万|千|億)?円?)`),
 		SalarySinglePattern: regexp.MustCompile(`(\d+(?:\.\d+)?[万億千]?)`),
-		LocationPattern:     regexp.MustCompile(`(?:都|道|府|県)(.+?[市区町村])`),
+		LocationPattern:     regexp.MustCompile(`(?:都|道|府|県)[\s ]*(\S+?[市区町村])`),
 	}
 }
 

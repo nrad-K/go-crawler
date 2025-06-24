@@ -1,9 +1,9 @@
 # 求人情報のスクレイピング設定
 base_url: "https://type.jp"
 
-html_dir: "/tmp/html"
+html_dir: "./tmp/html"
 
-output_dir: "/tmp/csv"
+output_dir: "./tmp/csv"
 
 max_workers: 3
 
