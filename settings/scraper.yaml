@@ -1,8 +1,13 @@
 # 求人情報のスクレイピング設定
 base_url: "https://type.jp"
 
-html_dir: "tmp/html"
-output_dir: "tmp/csv"
+html_dir: "/tmp/html"
+
+output_dir: "/tmp/csv"
+
+max_workers: 3
+
+file_name: "type.csv"
 
 # 求人タイトル（例: "Webエンジニア募集"）
 title:

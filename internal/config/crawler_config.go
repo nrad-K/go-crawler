@@ -29,7 +29,7 @@ type CrawlerConfig struct {
 	BaseURL                 string            `yaml:"base_url" validate:"url"`                                           // クロールを開始するベースURL
 	JobDetailResolveBaseURL string            `yaml:"job_detail_resolve_base_url" validate:"omitempty,url"`              // 求人詳細リンクが相対パスだった場合に使用する明示的な基準URL
 	CrawlSleepSeconds       int               `yaml:"crawl_sleep_seconds" validate:"min=1,max=60"`                       // 各リクエスト間の待機時間（秒）
-	CrawlTimeoutSeconds     int               `yaml:"crawl_timeout_seconds" validate:"min=1,max=300"`                    // リクエストのタイムアウト時間（秒）
+	CrawlTimeoutSeconds     int               `yaml:"crawl_timeout_seconds" validate:"min=1,max=100"`                    // リクエストのタイムアウト時間（秒）
 	EnableHeadless          bool              `yaml:"enable_headless"`
 	UserAgent               string            `yaml:"user_agent" validate:"required,min=1"` // リクエストヘッダーに設定するUser-Agent
 	OutputDir               string            `yaml:"output_dir" validate:"required"`       // クロール結果を保存するディレクトリ

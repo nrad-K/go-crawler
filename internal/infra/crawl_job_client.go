@@ -81,75 +81,96 @@ func (r *crawlJobClient) Delete(ctx context.Context, job model.CrawlJob) error {
 	return nil
 }
 
-// FindListByStatusは、指定したステータスのCrawlJobをRedisから取得します。
+// FindListByStatusStreamは、指定したステータスのCrawlJobをRedisからストリーム形式で取得します。
 //
 // args:
 //
 //	ctx: コンテキスト
-//	size: 取得する件数
+//	size: 1回のSCANで取得するキーの数
 //	status: 対象のジョブステータス
 //
 // return:
 //
-//	[]model.CrawlJob: 取得したジョブのリスト
-//	error: 取得に失敗した場合のエラー
-func (r *crawlJobClient) FindListByStatus(ctx context.Context, size int, status model.CrawlJobStatus) ([]model.CrawlJob, error) {
-
-	// バッチサイズを設定
+//	<-chan model.CrawlJobStream: 取得したジョブのストリーム
+func (r *crawlJobClient) FindListByStatusStream(ctx context.Context, size int, status model.CrawlJobStatus) <-chan model.CrawlJobStream {
 	batchSize := int64(size)
+	resultCh := make(chan model.CrawlJobStream, batchSize)
 
-	jobs := make([]model.CrawlJob, 0, batchSize)
-	var cursor uint64
+	go func() {
+		defer close(resultCh)
 
-	pattern := ""
-	switch status {
-	case model.CrawlJobStatusSuccess:
-		pattern = "success_job:*"
-	case model.CrawlJobStatusFailed:
-		pattern = "failed_job:*"
-	case model.CrawlJobStatusPending:
-		pattern = "pending_job:*"
-	default:
-		return nil, fmt.Errorf("サポートされていないジョブステータスです: %s", status)
-	}
-
-	for {
-		// SCANコマンドでキーを取得
-		keys, cursor, err := r.redis.Scan(ctx, cursor, pattern, batchSize).Result()
+		var cursor uint64 = 0
+		pattern, err := r.getJobKeyPattern(status)
 		if err != nil {
-			return nil, fmt.Errorf("redisスキャンエラー: %w", err)
+			resultCh <- model.CrawlJobStream{
+				Err: fmt.Errorf("ジョブキーのパターンの取得に失敗しました: %w", err),
+			}
+			return
 		}
 
-		// 取得したキーからジョブデータを取得
-		for _, key := range keys {
-			value, err := r.redis.Get(ctx, key).Result()
-			if err != nil {
-				return nil, fmt.Errorf("キー %s のRedis取得エラー: %w", key, err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
 			}
 
-			// デシリアライズ処理
-			jobRecord := CrawlJobRecord{}
-			err = json.Unmarshal([]byte(value), &jobRecord)
+			// SCANでキーを取得
+			keys, nextCursor, err := r.redis.Scan(ctx, cursor, pattern, batchSize).Result()
 			if err != nil {
-				return nil, fmt.Errorf("キー %s のJSONデシリアライズに失敗しました: %w", key, err)
+				resultCh <- model.CrawlJobStream{
+					Err: fmt.Errorf("Redis SCANエラー: %w", err),
+				}
+				return
 			}
 
-			job, err := jobRecord.ToDomain()
-			if err != nil {
-				fmt.Printf("ジョブデータのドメイン変換に失敗しました（キー: %s, エラー: %v）\n", key, err)
-				continue
+			for _, key := range keys {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				value, err := r.redis.Get(ctx, key).Result()
+				if err != nil {
+					resultCh <- model.CrawlJobStream{
+						Err: fmt.Errorf("キー %s のRedis取得エラー: %w", key, err),
+					}
+					continue
+				}
+
+				jobRecord := CrawlJobRecord{}
+				err = json.Unmarshal([]byte(value), &jobRecord)
+				if err != nil {
+					resultCh <- model.CrawlJobStream{
+						Err: fmt.Errorf("キー %s のJSONデシリアライズに失敗しました: %w", key, err),
+					}
+					continue
+				}
+
+				job, err := jobRecord.ToDomain()
+				if err != nil {
+					resultCh <- model.CrawlJobStream{
+						Err: fmt.Errorf("ジョブデータのドメイン変換に失敗しました（キー: %s, エラー: %v）", key, err),
+					}
+					continue
+				}
+
+				resultCh <- model.CrawlJobStream{
+					Job: job,
+					Err: nil,
+				}
 			}
 
-			jobs = append(jobs, job)
+			// カーソルが0になったら終了
+			if nextCursor == 0 {
+				break
+			}
+			cursor = nextCursor
 		}
+	}()
 
-		// カーソルが0になったら終了
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return jobs, nil
+	return resultCh
 }
 
 // Existsは、指定したCrawlJobがRedisに存在するか確認します。
@@ -173,6 +194,22 @@ func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, 
 		return false, fmt.Errorf("redisの存在確認に失敗しました: %w", err)
 	}
 	return exists > 0, nil
+}
+
+func (r *crawlJobClient) getJobKeyPattern(status model.CrawlJobStatus) (string, error) {
+	pattern := ""
+	switch status {
+	case model.CrawlJobStatusSuccess:
+		pattern = "success_job:*"
+	case model.CrawlJobStatusFailed:
+		pattern = "failed_job:*"
+	case model.CrawlJobStatusPending:
+		pattern = "pending_job:*"
+	default:
+		return pattern, fmt.Errorf("サポートされていないジョブステータスです: %s", status)
+	}
+
+	return pattern, nil
 }
 
 // generateJobKeyは、ジョブのステータスに応じたRedisキーを生成します。

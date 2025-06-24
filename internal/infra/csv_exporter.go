@@ -58,7 +58,7 @@ func formatUint64(p *uint64) string {
 //	error        : ディレクトリやファイルの作成、ヘッダーの書き込みに失敗した場合のエラー
 func NewCSVExporter(filePath string, headers []string) (*CSVExporter, error) {
 	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("出力ディレクトリの作成に失敗しました: %w", err)
 	}
 
@@ -89,6 +89,8 @@ func NewCSVExporter(filePath string, headers []string) (*CSVExporter, error) {
 //
 //	error : CSV行の書き込みに失敗した場合のエラー
 func (c *CSVExporter) Write(job model.JobPosting) error {
+	maxAmount := job.Salary().MaxAmount()
+	minAmount := job.Salary().MinAmount()
 
 	row := []string{
 		job.CompanyName(),
@@ -103,8 +105,8 @@ func (c *CSVExporter) Write(job model.JobPosting) error {
 		job.Headquarters().City(),
 		job.Headquarters().Raw(),
 		string(job.JobType()),
-		fmt.Sprintf("%d", job.Salary().MinAmount()),
-		formatUint64(job.Salary().MaxAmount()),
+		minAmount.Format(),
+		maxAmount.Format(),
 		string(job.Salary().Unit()),
 		job.PostedAt().Format("2006-01-02"),
 		job.Details().JobName(),

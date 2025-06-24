@@ -1,12 +1,40 @@
 package model
 
+import "fmt"
+
+type Amount struct {
+	value uint64
+	valid bool
+}
+
+func (a *Amount) Format() string {
+	if !a.valid {
+		return ""
+	}
+	return fmt.Sprintf("%d", a.value)
+}
+
+func NewAmount(value uint64) Amount {
+	return Amount{
+		value: uint64(value),
+		valid: true,
+	}
+}
+
+func NewNullAmount() Amount {
+	return Amount{
+		value: 0,
+		valid: false,
+	}
+}
+
 type Salary struct {
-	minAmount uint64
-	maxAmount *uint64
+	minAmount Amount
+	maxAmount Amount
 	unit      SalaryType
 }
 
-func NewSalary(minAmount uint64, maxAmount *uint64, salaryType SalaryType) Salary {
+func NewSalary(minAmount Amount, maxAmount Amount, salaryType SalaryType) Salary {
 	return Salary{
 		minAmount: minAmount,
 		maxAmount: maxAmount,
@@ -14,11 +42,11 @@ func NewSalary(minAmount uint64, maxAmount *uint64, salaryType SalaryType) Salar
 	}
 }
 
-func (s Salary) MinAmount() uint64 {
+func (s Salary) MinAmount() Amount {
 	return s.minAmount
 }
 
-func (s Salary) MaxAmount() *uint64 {
+func (s Salary) MaxAmount() Amount {
 	return s.maxAmount
 }
 

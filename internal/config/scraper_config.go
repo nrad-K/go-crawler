@@ -36,9 +36,11 @@ type DetailsConfig struct {
 
 // ScraperConfigはスクレイパーの動作設定をまとめる構造体です。
 type ScraperConfig struct {
-	BaseURL      string         `yaml:"base_url" validate:"required,url"`
-	HtmlDir      string         `yaml:"html_dir" validate:"required"`
-	OutputDir    string         `yaml:"output_dir" validate:"required"`
+	BaseURL      string         `yaml:"base_url" validate:"required,url,min=1"`
+	HtmlDir      string         `yaml:"html_dir" validate:"required,min=1"`
+	OutputDir    string         `yaml:"output_dir" validate:"required,min=1"`
+	MaxWorkers   int            `yaml:"max_workers" validate:"required,gt=0,max=10"`
+	FileName     string         `yaml:"file_name" validate:"required,min=1,max=20"`
 	Title        SelectorConfig `yaml:"title" validate:"required"`
 	CompanyName  SelectorConfig `yaml:"company_name" validate:"required"`
 	SummaryURL   SelectorConfig `yaml:"summary_url" validate:"required"`
@@ -54,8 +56,7 @@ type ScraperConfig struct {
 var validate = validator.New()
 
 // YAMLファイルからScraperConfigを読み込む
-func LoadScraperConfig() (ScraperConfig, error) {
-	path := "settings/scraper.yaml"
+func LoadScraperConfig(path string) (ScraperConfig, error) {
 	f, err := os.ReadFile(path)
 	if err != nil {
 		return ScraperConfig{}, fmt.Errorf("設定ファイルを読み込めませんでした: %w", err)

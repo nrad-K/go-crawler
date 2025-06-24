@@ -15,6 +15,11 @@ const (
 	CrawlJobStatusFailed  CrawlJobStatus = "FAILED"
 )
 
+type CrawlJobStream struct {
+	Job CrawlJob
+	Err error
+}
+
 type CrawlJob struct {
 	id     uuid.UUID
 	url    url.URL

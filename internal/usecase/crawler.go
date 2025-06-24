@@ -606,30 +606,34 @@ var (
 func (u *executeCrawlJobUseCase) ExecuteCrawlJob(ctx context.Context) error {
 	u.logger.Info("クローラーを開始します")
 
-	var totalProcessedJob int32 // 処理されたジョブの総数
+	successJob, failedJob := 0, 0
+	totalProcessedJob := successJob + failedJob
 
-	for {
-		jobs, err := u.repo.FindListByStatus(ctx, batchSize, model.CrawlJobStatusPending)
-		if err != nil {
-			u.logger.Error("保留中のクロールジョブの検索に失敗しました", "error", err)
-			break
+	resultStream := u.repo.FindListByStatusStream(ctx, batchSize, model.CrawlJobStatusPending)
+	for result := range resultStream {
+		if result.Err != nil {
+			u.logger.Error("クロールジョブの取得中にエラーが発生しました", "error", result.Err)
+			failedJob++
+			continue
 		}
 
-		if len(jobs) == 0 {
-			u.logger.Info("保留中のクロールジョブが見つかりませんでした。処理を終了します。")
-			break
+		job := result.Job
+		if err := u.processCrawl(ctx, job); err != nil {
+			u.logger.Error("クロール処理に失敗しました", "jobID", job.ID(), "url", job.URL(), "error", err)
+			failedJob++
 		}
+		successJob++
 
-		for _, job := range jobs {
-			u.processCrawl(ctx, job)
-			totalProcessedJob++
+		totalProcessedJob = successJob + failedJob
 
-			if totalProcessedJob%10 == 0 {
-				u.logger.Info("ジョブを処理しました", "total_processed", totalProcessedJob, "jobID", job.ID(), "url", job.URL())
-			}
+		if totalProcessedJob%10 == 0 {
+			u.logger.Info("ジョブを処理しました", "total_processed", totalProcessedJob, "jobID", job.ID(), "url", job.URL())
 		}
-		// 短い間隔を置いて次のバッチをフェッチ
-		time.Sleep(5 * time.Second) // 必要に応じて調整
+	}
+
+	if totalProcessedJob == 0 {
+		u.logger.Info("保留中のクロールジョブが見つかりませんでした。処理を終了します。")
+		return nil
 	}
 
 	u.logger.Info("クローラーが完了しました", "total_processed", totalProcessedJob)

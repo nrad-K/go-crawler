@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/nrad-K/go-crawler/internal/config"
+	"github.com/nrad-K/go-crawler/internal/constants"
 	"github.com/nrad-K/go-crawler/internal/domain/model"
 	"github.com/nrad-K/go-crawler/internal/infra"
 	"github.com/nrad-K/go-crawler/internal/logger"
@@ -81,9 +82,8 @@ func (u *saveJobPostingFromHTMLUseCase) SaveJobPostingCSV(ctx context.Context) e
 	jobs := make(chan string, len(dirpaths))
 	jobPosting := make(chan model.JobPosting, len(dirpaths))
 	var wg sync.WaitGroup
-	maxWorkers := 3
 
-	for i := 0; i < maxWorkers; i++ {
+	for i := 0; i < u.cfg.MaxWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -106,7 +106,7 @@ func (u *saveJobPostingFromHTMLUseCase) SaveJobPostingCSV(ctx context.Context) e
 			continue
 		}
 		writtenCount++
-		if writtenCount%100 == 0 {
+		if writtenCount%constants.LogBatchCount == 0 {
 			u.logger.Info("求人情報を書き込みました。", "count", writtenCount)
 		}
 	}

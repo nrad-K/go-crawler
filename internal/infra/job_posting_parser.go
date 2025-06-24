@@ -250,7 +250,9 @@ func (p *jobPostingParser) ParseBonus(text string) *uint {
 func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, error) {
 	salaryStr = p.normalizeString(salaryStr)
 	if salaryStr == "" {
-		return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与文字列が空です")
+		minAmount := model.NewAmount(0)
+		maxAmount := model.NewNullAmount()
+		return model.NewSalary(minAmount, maxAmount, model.UnknownSalaryType), fmt.Errorf("給与文字列が空です")
 	}
 
 	unit := p.ParseSalaryType(salaryStr)
@@ -270,31 +272,43 @@ func (p *jobPostingParser) ParseSalaryDetails(salaryStr string) (model.Salary, e
 			minStr += maxUnitMatch
 		}
 
-		minAmount, err := p.ParseAmount(minStr)
+		pMinAmount, err := p.ParseAmount(minStr)
 		if err != nil {
-			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の下限値のパースに失敗しました: %w", err)
+			minAmount := model.NewAmount(0)
+			maxAmount := model.NewNullAmount()
+			return model.NewSalary(minAmount, maxAmount, model.UnknownSalaryType), fmt.Errorf("給与の下限値のパースに失敗しました: %w", err)
 		}
 
-		maxAmount, err := p.ParseAmount(maxStr)
+		pMaxAmount, err := p.ParseAmount(maxStr)
 		if err != nil {
-			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の上限値のパースに失敗しました: %w", err)
+			minAmount := model.NewAmount(0)
+			maxAmount := model.NewNullAmount()
+			return model.NewSalary(minAmount, maxAmount, model.UnknownSalaryType), fmt.Errorf("給与の上限値のパースに失敗しました: %w", err)
 		}
 
-		return model.NewSalary(minAmount, &maxAmount, unit), nil
+		minAmount := model.NewAmount(pMinAmount)
+		maxAmount := model.NewAmount(pMaxAmount)
+
+		return model.NewSalary(minAmount, maxAmount, unit), nil
 	}
 
 	// reSingle := regexp.MustCompile(`(\d+(?:\.\d+)?[万億千]?)`)
 	// 単一表現の処理
 	if singleMatch := p.patterns.SalarySinglePattern.FindStringSubmatch(salaryStr); len(singleMatch) >= 2 {
 		amount, err := p.ParseAmount(singleMatch[1])
+		maxAmount := model.NewNullAmount()
 		if err != nil {
-			return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与のパースに失敗しました: %w", err)
+			minAmount := model.NewAmount(0)
+			return model.NewSalary(minAmount, maxAmount, model.UnknownSalaryType), fmt.Errorf("給与のパースに失敗しました: %w", err)
 		}
 
-		return model.NewSalary(amount, nil, unit), nil
+		minAmount := model.NewAmount(amount)
+		return model.NewSalary(minAmount, maxAmount, unit), nil
 	}
 
-	return model.NewSalary(0, nil, model.UnknownSalaryType), fmt.Errorf("給与の金額を抽出できませんでした: %s", salaryStr)
+	minAmount := model.NewAmount(0)
+	maxAmount := model.NewNullAmount()
+	return model.NewSalary(minAmount, maxAmount, model.UnknownSalaryType), fmt.Errorf("給与の金額を抽出できませんでした: %s", salaryStr)
 }
 
 // ParseSalaryTypeは、給与情報の文字列から給与の単位（年収、月給など）を特定します。
