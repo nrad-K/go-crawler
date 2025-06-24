@@ -196,6 +196,16 @@ func (r *crawlJobClient) Exists(ctx context.Context, job model.CrawlJob) (bool, 
 	return exists > 0, nil
 }
 
+// getJobKeyPatternは、指定されたジョブステータスに対応するRedisキーのパターンを生成します。
+//
+// args:
+//
+//	status: パターンを生成する対象のジョブステータス
+//
+// return:
+//
+//	string: 生成されたキーパターン
+//	error: サポートされていないステータスが指定された場合のエラー
 func (r *crawlJobClient) getJobKeyPattern(status model.CrawlJobStatus) (string, error) {
 	pattern := ""
 	switch status {
