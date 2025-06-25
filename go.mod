@@ -12,6 +12,7 @@ require (
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/sync v0.15.0
+	golang.org/x/text v0.26.0
 )
 
 require (
@@ -30,5 +31,4 @@ require (
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.26.0 // indirect
 )
